@@ -2,7 +2,6 @@ import { useState, useRef, useCallback } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Play,
   CheckCircle2,
@@ -383,13 +382,11 @@ export default function Dashboard() {
                 </div>
               </CardHeader>
               <CardContent>
-                <ScrollArea className="max-h-[600px]">
-                  <div className="space-y-2">
-                    {state.steps.map((step, i) => (
-                      <StepItem key={step.id} step={step} index={i} />
-                    ))}
-                  </div>
-                </ScrollArea>
+                <div className="max-h-[600px] overflow-y-auto space-y-2 pr-1">
+                  {state.steps.map((step, i) => (
+                    <StepItem key={step.id} step={step} index={i} />
+                  ))}
+                </div>
                 {state.errorMessage && (
                   <div className="mt-3 p-3 bg-destructive/10 border border-destructive/20 rounded-md">
                     <p className="text-sm text-destructive font-medium">{state.errorMessage}</p>
@@ -429,11 +426,11 @@ export default function Dashboard() {
                 </CardHeader>
                 {showReport && (
                   <CardContent>
-                    <ScrollArea className="max-h-[800px]">
+                    <div className="max-h-[800px] overflow-y-auto pr-1">
                       <pre className="text-xs font-mono text-foreground whitespace-pre-wrap bg-muted/30 p-4 rounded-md" data-testid="text-report-content">
                         {rawReport}
                       </pre>
-                    </ScrollArea>
+                    </div>
                   </CardContent>
                 )}
               </Card>
