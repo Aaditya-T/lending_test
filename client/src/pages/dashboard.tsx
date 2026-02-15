@@ -290,9 +290,9 @@ export default function Dashboard() {
     };
   }, []);
 
+  const TOTAL_STEPS = 12;
   const completedSteps = state.steps.filter((s) => s.status === "success").length;
-  const totalSteps = state.steps.length;
-  const progress = totalSteps > 0 ? (completedSteps / totalSteps) * 100 : 0;
+  const progress = (completedSteps / TOTAL_STEPS) * 100;
 
   return (
     <div className="min-h-screen bg-background">
@@ -358,11 +358,9 @@ export default function Dashboard() {
                 <div className="flex items-center justify-between gap-4 flex-wrap">
                   <CardTitle className="text-sm font-semibold">
                     Execution Steps
-                    {totalSteps > 0 && (
-                      <span className="ml-2 text-muted-foreground font-normal">
-                        ({completedSteps}/{totalSteps})
-                      </span>
-                    )}
+                    <span className="ml-2 text-muted-foreground font-normal">
+                      ({completedSteps}/{TOTAL_STEPS})
+                    </span>
                   </CardTitle>
                   {state.status === "running" && (
                     <div className="w-32 h-1.5 bg-muted rounded-full overflow-hidden">
