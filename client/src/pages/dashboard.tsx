@@ -21,7 +21,7 @@ import {
   User,
   Banknote,
 } from "lucide-react";
-import type { FlowState, FlowStep, Party } from "@shared/schema";
+import type { FlowState, FlowStep, Party } from "@/lib/types";
 
 const ROLE_CONFIG: Record<string, { icon: typeof Wallet; color: string; bgColor: string }> = {
   issuer: { icon: Banknote, color: "text-amber-600 dark:text-amber-400", bgColor: "bg-amber-50 dark:bg-amber-950/40" },

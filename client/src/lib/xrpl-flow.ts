@@ -4,7 +4,7 @@ if (typeof globalThis.Buffer === "undefined") {
 }
 
 import * as xrpl from "xrpl";
-import type { FlowStep, Party } from "@shared/schema";
+import type { FlowStep, Party } from "./types";
 
 type EmitFn = (event: { type: string; data: any }) => void;
 
@@ -226,7 +226,7 @@ async function step6_createVault(ctx: FlowContext, emit: EmitFn): Promise<void> 
       Data: toHex("USD Lending Vault"),
     };
 
-    const prepared = await ctx.client.autofill(vaultCreateTx);
+    const prepared = await ctx.client.autofill(vaultCreateTx as any);
     const signed = ctx.broker.wallet.sign(prepared);
     const result = await ctx.client.submitAndWait(signed.tx_blob);
     const txResult = (result.result.meta as any)?.TransactionResult || "unknown";
@@ -269,7 +269,7 @@ async function step7_createLoanBroker(ctx: FlowContext, emit: EmitFn): Promise<v
       VaultID: ctx.vaultId,
     };
 
-    const prepared = await ctx.client.autofill(loanBrokerSetTx);
+    const prepared = await ctx.client.autofill(loanBrokerSetTx as any);
     const signed = ctx.broker.wallet.sign(prepared);
     const result = await ctx.client.submitAndWait(signed.tx_blob);
     const txResult = (result.result.meta as any)?.TransactionResult || "unknown";
@@ -313,7 +313,7 @@ async function step8_lenderDeposits(ctx: FlowContext, emit: EmitFn): Promise<voi
       Amount: { currency: "USD", issuer: ctx.issuer.address, value: "5000" },
     };
 
-    const prepared = await ctx.client.autofill(vaultDepositTx);
+    const prepared = await ctx.client.autofill(vaultDepositTx as any);
     const signed = ctx.lender.wallet.sign(prepared);
     const result = await ctx.client.submitAndWait(signed.tx_blob);
     const txResult = (result.result.meta as any)?.TransactionResult || "unknown";
@@ -398,7 +398,7 @@ async function step11_loanSetWithCounterparty(ctx: FlowContext, emit: EmitFn): P
       PaymentTotal: 12,
     };
 
-    const prepared = await ctx.client.autofill(loanSetTx);
+    const prepared = await ctx.client.autofill(loanSetTx as any);
 
     addReport(ctx,
       "=".repeat(70), "STEP 11: CREATE LOAN WITH COUNTERPARTY SIGNATURE (XLS-66 LoanSet)", "=".repeat(70),
