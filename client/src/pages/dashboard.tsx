@@ -1,7 +1,8 @@
-import { useState, useRef, useCallback } from "react";
+import { useState, useCallback } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { runLendingFlow } from "@/lib/xrpl-flow";
 import {
   Play,
   CheckCircle2,
@@ -147,7 +148,7 @@ function StepItem({ step, index }: { step: FlowStep; index: number }) {
               <code className="text-xs font-mono text-muted-foreground flex-1 truncate" data-testid={`text-txhash-${step.id}`}>
                 {step.transactionHash}
               </code>
-              <Button size="icon" variant="ghost" className="h-6 w-6" onClick={() => copyToClipboard(step.transactionHash!)}>
+              <Button size="icon" variant="ghost" onClick={() => copyToClipboard(step.transactionHash!)}>
                 <Copy className="w-3 h-3" />
               </Button>
             </div>
@@ -225,69 +226,50 @@ export default function Dashboard() {
   const [state, setState] = useState<FlowState>(initialState);
   const [rawReport, setRawReport] = useState<string>("");
   const [showReport, setShowReport] = useState(false);
-  const eventSourceRef = useRef<EventSource | null>(null);
 
   const startFlow = useCallback(() => {
-    setState((prev) => ({ ...prev, status: "running", steps: [], errorMessage: undefined }));
+    setState((prev) => ({
+      ...initialState,
+      status: "running",
+    }));
     setRawReport("");
     setShowReport(false);
 
-    if (eventSourceRef.current) {
-      eventSourceRef.current.close();
-    }
-
-    const es = new EventSource("/api/run-flow");
-    eventSourceRef.current = es;
-
-    es.onmessage = (event) => {
-      try {
-        const parsed = JSON.parse(event.data) as { type: string; data: any };
-
-        if (parsed.type === "step_update") {
-          const step = parsed.data as FlowStep;
-          setState((prev) => {
-            const existing = prev.steps.findIndex((s) => s.id === step.id);
-            const newSteps = [...prev.steps];
-            if (existing >= 0) {
-              newSteps[existing] = step;
-            } else {
-              newSteps.push(step);
-            }
-            return { ...prev, steps: newSteps };
-          });
-        } else if (parsed.type === "party_update") {
-          const party = parsed.data as Party;
-          setState((prev) => ({
-            ...prev,
-            parties: prev.parties.map((p) =>
-              p.role === party.role ? { ...p, ...party } : p
-            ),
-          }));
-        } else if (parsed.type === "state_update") {
-          setState((prev) => ({ ...prev, ...parsed.data }));
-        } else if (parsed.type === "flow_complete") {
-          setState((prev) => ({ ...prev, status: "completed", completedAt: new Date().toISOString() }));
-          setRawReport(parsed.data.report || "");
-          es.close();
-        } else if (parsed.type === "flow_error") {
-          setState((prev) => ({ ...prev, status: "error", errorMessage: parsed.data.message }));
-          setRawReport(parsed.data.report || "");
-          es.close();
-        }
-      } catch (e) {
-        console.error("SSE parse error:", e);
+    const emit = (event: { type: string; data: any }) => {
+      if (event.type === "step_update") {
+        const step = event.data as FlowStep;
+        setState((prev) => {
+          const existing = prev.steps.findIndex((s) => s.id === step.id);
+          const newSteps = [...prev.steps];
+          if (existing >= 0) {
+            newSteps[existing] = step;
+          } else {
+            newSteps.push(step);
+          }
+          return { ...prev, steps: newSteps };
+        });
+      } else if (event.type === "party_update") {
+        const party = event.data as Party;
+        setState((prev) => ({
+          ...prev,
+          parties: prev.parties.map((p) =>
+            p.role === party.role ? { ...p, ...party } : p
+          ),
+        }));
+      } else if (event.type === "state_update") {
+        setState((prev) => ({ ...prev, ...event.data }));
+      } else if (event.type === "flow_complete") {
+        setState((prev) => ({ ...prev, status: "completed", completedAt: new Date().toISOString() }));
+        setRawReport(event.data.report || "");
+      } else if (event.type === "flow_error") {
+        setState((prev) => ({ ...prev, status: "error", errorMessage: event.data.message }));
+        setRawReport(event.data.report || "");
       }
     };
 
-    es.onerror = () => {
-      setState((prev) => {
-        if (prev.status === "running") {
-          return { ...prev, status: "error", errorMessage: "Connection lost" };
-        }
-        return prev;
-      });
-      es.close();
-    };
+    runLendingFlow(emit).catch((err) => {
+      setState((prev) => ({ ...prev, status: "error", errorMessage: err.message }));
+    });
   }, []);
 
   const TOTAL_STEPS = 12;
