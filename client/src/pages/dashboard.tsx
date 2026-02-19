@@ -1,7 +1,8 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { ThemeToggle } from "@/components/theme-toggle";
 import { runLendingFlow } from "@/lib/xrpl-flow";
 import {
   Play,
@@ -20,6 +21,9 @@ import {
   Building2,
   User,
   Banknote,
+  AlertTriangle,
+  Download,
+  Upload,
 } from "lucide-react";
 import type { FlowState, FlowStep, Party } from "@/lib/types";
 
@@ -37,6 +41,10 @@ function truncateAddress(addr?: string) {
 
 function copyToClipboard(text: string) {
   navigator.clipboard.writeText(text);
+}
+
+function devnetUrl(type: "accounts" | "transactions", id: string) {
+  return `https://devnet.xrpl.org/${type}/${id}`;
 }
 
 function PartyCard({ party }: { party: Party }) {
@@ -69,6 +77,11 @@ function PartyCard({ party }: { party: Party }) {
               >
                 <Copy className="w-3 h-3" />
               </Button>
+              <a href={devnetUrl("accounts", party.address!)} target="_blank" rel="noopener noreferrer">
+                <Button size="icon" variant="ghost" className="h-6 w-6" data-testid={`button-explorer-${party.role}`}>
+                  <ExternalLink className="w-3 h-3" />
+                </Button>
+              </a>
             </div>
             {party.balance && (
               <p className="text-xs text-muted-foreground">
@@ -151,6 +164,11 @@ function StepItem({ step, index }: { step: FlowStep; index: number }) {
               <Button size="icon" variant="ghost" onClick={() => copyToClipboard(step.transactionHash!)}>
                 <Copy className="w-3 h-3" />
               </Button>
+              <a href={devnetUrl("transactions", step.transactionHash!)} target="_blank" rel="noopener noreferrer">
+                <Button size="icon" variant="ghost" data-testid={`button-explorer-tx-${step.id}`}>
+                  <ExternalLink className="w-3 h-3" />
+                </Button>
+              </a>
             </div>
           )}
           {step.error && (
@@ -226,6 +244,46 @@ export default function Dashboard() {
   const [state, setState] = useState<FlowState>(initialState);
   const [rawReport, setRawReport] = useState<string>("");
   const [showReport, setShowReport] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleExport = useCallback(() => {
+    const timestamp = Date.now();
+    const data = {
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      state,
+      report: rawReport,
+    };
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `xrpl-flow-${timestamp}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [state, rawReport]);
+
+  const handleImport = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const parsed = JSON.parse(event.target?.result as string);
+        if (!parsed.version || !parsed.state?.parties) {
+          alert("Invalid flow data file.");
+          return;
+        }
+        setState(parsed.state);
+        setRawReport(parsed.report || "");
+        setShowReport(false);
+      } catch {
+        alert("Failed to parse the imported file.");
+      }
+    };
+    reader.readAsText(file);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  }, []);
 
   const startFlow = useCallback(() => {
     setState((prev) => ({
@@ -293,6 +351,31 @@ export default function Dashboard() {
             <Badge variant="outline" className="font-mono text-xs" data-testid="text-network">
               Devnet
             </Badge>
+            <ThemeToggle />
+            <Button
+              variant="outline"
+              onClick={handleExport}
+              disabled={state.status === "idle"}
+              data-testid="button-export-flow"
+            >
+              <Download className="w-4 h-4" />
+              Export
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => fileInputRef.current?.click()}
+              data-testid="button-import-flow"
+            >
+              <Upload className="w-4 h-4" />
+              Import
+            </Button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".json"
+              className="hidden"
+              onChange={handleImport}
+            />
             <Button
               onClick={startFlow}
               disabled={state.status === "running"}
@@ -315,6 +398,10 @@ export default function Dashboard() {
       </header>
 
       <main className="max-w-6xl mx-auto px-4 py-6 space-y-6">
+        <div className="flex items-center gap-2 p-3 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-md text-xs text-amber-800 dark:text-amber-300" data-testid="banner-session-warning">
+          <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+          <span>Run data is temporary and will be lost when you refresh the page. Use Export to save your results.</span>
+        </div>
         <Card>
           <CardHeader className="pb-3">
             <CardTitle className="text-sm font-semibold flex items-center gap-2">
