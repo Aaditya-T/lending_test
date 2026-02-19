@@ -26,7 +26,7 @@ export const partySchema = z.object({
 
 export type Party = z.infer<typeof partySchema>;
 
-export type ScenarioId = "loan-creation" | "loan-default" | "loan-payment" | "early-repayment" | "full-lifecycle";
+export type ScenarioId = "loan-creation" | "loan-default" | "loan-payment" | "early-repayment" | "full-lifecycle" | "signerlist-loan";
 
 export interface ScenarioConfig {
   id: ScenarioId;
@@ -99,6 +99,17 @@ export const SCENARIOS: ScenarioConfig[] = [
       { label: "Delete Broker", actor: "Broker" },
       { label: "Vault Withdraw", actor: "Lender" },
       { label: "Delete Vault", actor: "Broker" },
+    ],
+  },
+  {
+    id: "signerlist-loan",
+    name: "SignerList Loan",
+    description: "Create a loan using standard XRPL multi-sig (SignerListSet + Signers array) instead of CounterpartySignature co-signing",
+    diagramSteps: [
+      { label: "Setup", actor: "All" },
+      { label: "SignerListSet", actor: "Broker" },
+      { label: "Multi-Sig Loan", actor: "Borrower" },
+      { label: "Verify", actor: "System" },
     ],
   },
 ];

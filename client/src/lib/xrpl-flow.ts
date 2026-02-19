@@ -507,6 +507,134 @@ async function step_loanSet(ctx: FlowContext, emit: EmitFn): Promise<void> {
   }
 }
 
+async function step_signerListSet(ctx: FlowContext, emit: EmitFn): Promise<void> {
+  const stepId = "signerlist-set";
+  emitStep(emit, { id: stepId, title: "Set Up SignerList on Broker", description: "Broker configures SignerListSet adding Borrower as authorized signer (quorum=1) for multi-sig LoanSet", status: "running", transactionType: "SignerListSet" });
+
+  try {
+    const signerListTx: Record<string, any> = {
+      TransactionType: "SignerListSet",
+      Account: ctx.broker.address,
+      SignerQuorum: 1,
+      SignerEntries: [
+        { SignerEntry: { Account: ctx.borrower.address, SignerWeight: 1 } },
+      ],
+    };
+
+    const prepared = await ctx.client.autofill(signerListTx as any);
+    const signed = ctx.broker.wallet.sign(prepared);
+    const result = await ctx.client.submitAndWait(signed.tx_blob);
+    const txResult = (result.result.meta as any)?.TransactionResult || "unknown";
+
+    addReport(ctx,
+      "=".repeat(70), "SIGNERLIST SET (Multi-Sig Setup)", "=".repeat(70),
+      `TX Hash:  ${signed.hash}`, `Result:   ${txResult}`,
+      `Account:  ${ctx.broker.address}`,
+      `Quorum:   1`,
+      `Signer:   ${ctx.borrower.address} (weight: 1)`, "",
+      "This configures the broker account so that LoanSet transactions",
+      "can be authorized via standard XRPL multi-signature (Signers array).",
+      "Note: XRPL does not allow an account to be in its own SignerList.",
+      "The borrower is added as a signer who can authorize broker transactions.", ""
+    );
+
+    emitStep(emit, { id: stepId, title: "Set Up SignerList on Broker", description: `SignerList configured: ${txResult}`, status: txResult === "tesSUCCESS" ? "success" : "error", transactionHash: signed.hash, transactionType: "SignerListSet", details: { "Result": txResult, "Quorum": "1", "Signer": `${ctx.borrower.address} (weight: 1)`, "Purpose": "Enable borrower to authorize broker's LoanSet via multi-sig", "Note": "XRPL prohibits accounts from being in their own SignerList" }, error: txResult !== "tesSUCCESS" ? `SignerListSet failed: ${txResult}` : undefined });
+
+    if (txResult !== "tesSUCCESS") throw new Error(`SignerListSet failed: ${txResult}`);
+  } catch (err: any) {
+    emitStep(emit, { id: stepId, title: "Set Up SignerList on Broker", description: "Failed", status: "error", error: err.message });
+    throw err;
+  }
+}
+
+async function step_loanSetMultiSig(ctx: FlowContext, emit: EmitFn): Promise<void> {
+  const stepId = "loan-set-multisig";
+  emitStep(emit, { id: stepId, title: "Create Loan with Multi-Sig (SignerList)", description: "LoanSet authorized by Borrower via Signers array (standard XRPL multi-sig on broker account)", status: "running", transactionType: "LoanSet" });
+
+  try {
+    addReport(ctx,
+      "=".repeat(70), "CREATE LOAN WITH MULTI-SIG SIGNERLIST (XLS-66 LoanSet)", "=".repeat(70), ""
+    );
+
+    try {
+      const vaultObj = await ctx.client.request({ command: "ledger_entry", index: ctx.vaultId } as any);
+      addReport(ctx, "Pre-flight Vault State:", JSON.stringify(vaultObj.result?.node || vaultObj.result, null, 2), "");
+    } catch (e: any) {
+      addReport(ctx, `Vault query failed: ${e.message}`, "");
+    }
+
+    try {
+      const loanBrokerObj = await ctx.client.request({ command: "ledger_entry", index: ctx.loanBrokerId } as any);
+      addReport(ctx, "Pre-flight LoanBroker State:", JSON.stringify(loanBrokerObj.result?.node || loanBrokerObj.result, null, 2), "");
+    } catch (e: any) {
+      addReport(ctx, `LoanBroker query failed: ${e.message}`, "");
+    }
+
+    const loanSetTx: Record<string, any> = {
+      TransactionType: "LoanSet",
+      Account: ctx.broker.address,
+      LoanBrokerID: ctx.loanBrokerId,
+      PrincipalRequested: "1000",
+      Counterparty: ctx.borrower.address,
+      InterestRate: 500,
+      PaymentInterval: 3600,
+      PaymentTotal: 12,
+      SigningPubKey: "",
+    };
+
+    const prepared = await ctx.client.autofill(loanSetTx as any);
+
+    const signerCount = 1;
+    const baseFee = parseInt(prepared.Fee || "12", 10);
+    prepared.Fee = String(baseFee * (signerCount + 1));
+
+    addReport(ctx,
+      "LoanSet Transaction (autofilled for multi-sig):", JSON.stringify(prepared, null, 2), "",
+      `Fee adjusted to ${prepared.Fee} drops (${signerCount + 1}x base fee for ${signerCount} signer)`, ""
+    );
+
+    const borrowerSigned = ctx.borrower.wallet.sign(prepared, true);
+    addReport(ctx, `Borrower multi-sig signature added (signing on behalf of broker account)`, "");
+
+    const combinedBlob = (xrpl as any).multisign([borrowerSigned.tx_blob]);
+    addReport(ctx, "Multi-sig transaction assembled with xrpl.multisign()", "");
+
+    const result = await ctx.client.submitAndWait(combinedBlob);
+    const txResult = (result.result.meta as any)?.TransactionResult || "unknown";
+    const txHash = result.result.hash;
+
+    let loanId = "";
+    const affectedNodes = (result.result.meta as any)?.AffectedNodes || [];
+    for (const node of affectedNodes) {
+      if (node.CreatedNode?.LedgerEntryType === "Loan") {
+        loanId = node.CreatedNode.LedgerIndex;
+        break;
+      }
+    }
+
+    ctx.loanId = loanId;
+
+    addReport(ctx,
+      `TX Hash:  ${txHash}`, `Result:   ${txResult}`, `Loan ID:  ${loanId || "N/A"}`, "",
+      "Co-signing method: Standard XRPL multi-sig via SignerList",
+      "Borrower (listed in broker's SignerList) authorized the LoanSet",
+      "via Signers array - an alternative to CounterpartySignature", ""
+    );
+
+    if (txResult === "tesSUCCESS") {
+      emitParty(emit, { role: "borrower", usdBalance: "1,000 USD (loan)" });
+    }
+
+    emitStep(emit, { id: stepId, title: "Create Loan with Multi-Sig (SignerList)", description: loanId ? `Loan created: ${loanId.slice(0, 12)}... | Multi-sig authorized` : `LoanSet submitted: ${txResult}`, status: txResult === "tesSUCCESS" ? "success" : "error", transactionHash: txHash, transactionType: "LoanSet", details: { "Result": txResult, "Loan ID": loanId || "N/A", "Principal Requested": "1,000 USD", "Interest Rate": "5% (500 basis points)", "Payment Interval": "3600s (1 hour)", "Payment Total": "12 payments", "Co-Sign Method": "SignerList Multi-Sig (Signers array)", "Authorized Signer": ctx.borrower.address, "Account": ctx.broker.address, "Note": "Borrower signs on behalf of broker via SignerList" }, error: txResult !== "tesSUCCESS" ? `LoanSet failed: ${txResult}` : undefined });
+
+    if (txResult !== "tesSUCCESS") throw new Error(`LoanSet multi-sig failed: ${txResult}`);
+  } catch (err: any) {
+    addReport(ctx, `ERROR: ${err.message}`, "");
+    emitStep(emit, { id: stepId, title: "Create Loan with Multi-Sig (SignerList)", description: "Failed - see error details", status: "error", transactionType: "LoanSet", error: err.message });
+    throw err;
+  }
+}
+
 async function step_fundBorrowerForRepayment(ctx: FlowContext, emit: EmitFn): Promise<void> {
   const stepId = "fund-borrower-repayment";
   emitStep(emit, { id: stepId, title: "Fund Borrower for Repayment", description: "Issuer sends additional USD to Borrower so they can repay principal + interest", status: "running", transactionType: "Payment" });
@@ -889,6 +1017,7 @@ function getScenarioStepCount(scenarioId: ScenarioId): number {
     case "loan-default": return 15;
     case "early-repayment": return 16;
     case "full-lifecycle": return 19;
+    case "signerlist-loan": return 14;
     default: return 13;
   }
 }
@@ -918,40 +1047,47 @@ export async function runLendingFlow(emit: EmitFn, scenarioId: ScenarioId = "loa
     addReport(ctx, `Connected to ${network}`, "");
 
     await runSharedSetup(ctx, emit);
-    await step_loanSet(ctx, emit);
 
-    switch (scenarioId) {
-      case "loan-creation":
-        await step_verifyStates(ctx, emit);
-        break;
+    if (scenarioId === "signerlist-loan") {
+      await step_signerListSet(ctx, emit);
+      await step_loanSetMultiSig(ctx, emit);
+      await step_verifyStates(ctx, emit);
+    } else {
+      await step_loanSet(ctx, emit);
 
-      case "loan-payment":
-        await step_loanPay(ctx, emit);
-        await step_verifyStates(ctx, emit);
-        break;
+      switch (scenarioId) {
+        case "loan-creation":
+          await step_verifyStates(ctx, emit);
+          break;
 
-      case "loan-default":
-        await step_loanManageDefault(ctx, emit);
-        await step_loanDelete(ctx, emit);
-        await step_verifyStates(ctx, emit);
-        break;
+        case "loan-payment":
+          await step_loanPay(ctx, emit);
+          await step_verifyStates(ctx, emit);
+          break;
 
-      case "early-repayment":
-        await step_fundBorrowerForRepayment(ctx, emit);
-        await step_loanPay(ctx, emit, { earlyFull: true });
-        await step_loanDelete(ctx, emit);
-        await step_verifyStates(ctx, emit);
-        break;
+        case "loan-default":
+          await step_loanManageDefault(ctx, emit);
+          await step_loanDelete(ctx, emit);
+          await step_verifyStates(ctx, emit);
+          break;
 
-      case "full-lifecycle":
-        await step_loanPay(ctx, emit);
-        await step_loanManageDefault(ctx, emit);
-        await step_loanDelete(ctx, emit);
-        await step_brokerCoverWithdraw(ctx, emit);
-        await step_loanBrokerDelete(ctx, emit);
-        await step_vaultWithdraw(ctx, emit);
-        await step_vaultDelete(ctx, emit);
-        break;
+        case "early-repayment":
+          await step_fundBorrowerForRepayment(ctx, emit);
+          await step_loanPay(ctx, emit, { earlyFull: true });
+          await step_loanDelete(ctx, emit);
+          await step_verifyStates(ctx, emit);
+          break;
+
+        case "full-lifecycle":
+          await step_loanPay(ctx, emit);
+          await step_loanManageDefault(ctx, emit);
+          await step_loanDelete(ctx, emit);
+          await step_brokerCoverWithdraw(ctx, emit);
+          await step_loanBrokerDelete(ctx, emit);
+          await step_vaultWithdraw(ctx, emit);
+          await step_vaultDelete(ctx, emit);
+          break;
+      }
     }
 
     addReport(ctx,

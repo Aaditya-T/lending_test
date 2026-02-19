@@ -20,12 +20,13 @@ End-to-end demo of the XRPL Lending Protocol (XLS-66) with Single Asset Vaults (
 - `vercel.json` - Vercel deployment configuration
 
 ## Scenarios
-The app supports 5 scenarios, all sharing a common setup phase (11 steps):
-1. **Loan Creation** - Setup + LoanSet + verify (base scenario)
+The app supports 6 scenarios, all sharing a common setup phase (11 steps):
+1. **Loan Creation** - Setup + LoanSet (CounterpartySignature) + verify (base scenario)
 2. **Loan Payment** - Setup + LoanSet + LoanPay + verify
 3. **Loan Default** - Setup + LoanSet + LoanManage (default) + LoanDelete + verify
 4. **Early Repayment** - Setup + LoanSet + LoanPay (full early) + LoanDelete + verify
 5. **Full Lifecycle** - Setup + LoanSet + LoanPay + LoanManage + LoanDelete + CoverWithdraw + BrokerDelete + VaultWithdraw + VaultDelete
+6. **SignerList Loan** - Setup + SignerListSet (multi-sig config) + LoanSet (via Signers array multi-sig) + verify
 
 ## Shared Setup Steps (all scenarios)
 1. Fund 4 wallets via faucet
@@ -41,16 +42,24 @@ The app supports 5 scenarios, all sharing a common setup phase (11 steps):
 11. Broker deposits first-loss capital (LoanBrokerCoverDeposit - 500 USD)
 
 ## Transaction Types Implemented
-- AccountSet, TrustSet, Payment (standard XRPL)
+- AccountSet, TrustSet, Payment, SignerListSet (standard XRPL)
 - VaultCreate, VaultDeposit, VaultWithdraw, VaultDelete (XLS-65)
 - LoanBrokerSet, LoanBrokerCoverDeposit, LoanBrokerCoverWithdraw, LoanBrokerDelete (XLS-66)
-- LoanSet (with CounterpartySignature), LoanPay, LoanManage, LoanDelete (XLS-66)
+- LoanSet (with CounterpartySignature OR multi-sig Signers), LoanPay, LoanManage, LoanDelete (XLS-66)
 
-## Co-Signing Pattern
-Uses CounterpartySignature (not multi-sign/SignerList):
+## Co-Signing Patterns (Two Approaches)
+### 1. CounterpartySignature (XLS-66 specific)
 - Broker creates and signs LoanSet transaction
 - Borrower co-signs using `xrpl.signLoanSetByCounterparty(wallet, brokerSignedTxBlob)`
 - Final transaction contains CounterpartySignature field
+
+### 2. SignerList Multi-Sig (Standard XRPL)
+- Broker sets up SignerListSet with Borrower as signer (quorum=1)
+- Note: XRPL prohibits accounts from being in their own SignerList
+- LoanSet is built with `SigningPubKey: ""` for multi-sig
+- Borrower signs with `wallet.sign(tx, true)` (multi-sign mode)
+- Signature assembled via `xrpl.multisign([borrowerBlob])`
+- Fee adjusted to `(signers + 1) * baseFee` per XRPL multi-sig rules
 
 ## First-Loss Capital (Cover)
 - Broker must deposit first-loss capital via LoanBrokerCoverDeposit before issuing loans
