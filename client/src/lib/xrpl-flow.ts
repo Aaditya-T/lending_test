@@ -4,7 +4,7 @@ if (typeof globalThis.Buffer === "undefined") {
 }
 
 import * as xrpl from "xrpl";
-import type { FlowStep, Party } from "./types";
+import type { FlowStep, Party, ScenarioId } from "./types";
 
 type EmitFn = (event: { type: string; data: any }) => void;
 
@@ -53,7 +53,7 @@ async function fundWallet(client: xrpl.Client): Promise<WalletInfo> {
   return { wallet, address: wallet.address, seed: wallet.seed! };
 }
 
-async function step1_fundWallets(ctx: FlowContext, emit: EmitFn): Promise<void> {
+async function step_fundWallets(ctx: FlowContext, emit: EmitFn): Promise<void> {
   const stepId = "fund-wallets";
   emitStep(emit, { id: stepId, title: "Fund All Wallets", description: "Creating and funding 4 wallets on XRPL Devnet via faucet", status: "running", transactionType: "Faucet" });
 
@@ -76,7 +76,7 @@ async function step1_fundWallets(ctx: FlowContext, emit: EmitFn): Promise<void> 
     emitParty(emit, { role: "broker", label: "Broker", address: broker.address, seed: broker.seed, balance: "100 XRP" });
 
     addReport(ctx,
-      "=".repeat(70), "STEP 1: FUND WALLETS", "=".repeat(70),
+      "=".repeat(70), "FUND WALLETS", "=".repeat(70),
       `Issuer:   ${issuer.address} (seed: ${issuer.seed})`,
       `Lender:   ${lender.address} (seed: ${lender.seed})`,
       `Borrower: ${borrower.address} (seed: ${borrower.seed})`,
@@ -90,7 +90,7 @@ async function step1_fundWallets(ctx: FlowContext, emit: EmitFn): Promise<void> 
   }
 }
 
-async function step2_issuerSetup(ctx: FlowContext, emit: EmitFn): Promise<void> {
+async function step_issuerSetup(ctx: FlowContext, emit: EmitFn): Promise<void> {
   const stepId = "issuer-setup";
   emitStep(emit, { id: stepId, title: "Enable Issuer Settings", description: "Setting DefaultRipple on Issuer account for IOU issuance", status: "running", transactionType: "AccountSet" });
 
@@ -107,8 +107,8 @@ async function step2_issuerSetup(ctx: FlowContext, emit: EmitFn): Promise<void> 
     const txResult = (result.result.meta as any)?.TransactionResult || "unknown";
 
     addReport(ctx,
-      "=".repeat(70), "STEP 2: ISSUER ACCOUNT SETUP (DefaultRipple)", "=".repeat(70),
-      `TX Hash: ${signed.hash}`, `Result:  ${txResult}`, `Account: ${ctx.issuer.address}`, `Flag:    asfDefaultRipple`, ""
+      "=".repeat(70), "ISSUER ACCOUNT SETUP (DefaultRipple)", "=".repeat(70),
+      `TX Hash: ${signed.hash}`, `Result:  ${txResult}`, ""
     );
 
     emitStep(emit, { id: stepId, title: "Enable Issuer Settings", description: "DefaultRipple enabled on Issuer account", status: txResult === "tesSUCCESS" ? "success" : "error", transactionHash: signed.hash, transactionType: "AccountSet", details: { "Result": txResult, "Flag": "asfDefaultRipple" }, error: txResult !== "tesSUCCESS" ? `Transaction failed: ${txResult}` : undefined });
@@ -120,7 +120,7 @@ async function step2_issuerSetup(ctx: FlowContext, emit: EmitFn): Promise<void> 
   }
 }
 
-async function step3_lenderTrustline(ctx: FlowContext, emit: EmitFn): Promise<void> {
+async function step_lenderTrustline(ctx: FlowContext, emit: EmitFn): Promise<void> {
   const stepId = "lender-trustline";
   emitStep(emit, { id: stepId, title: "Lender Creates USD Trustline", description: "Lender creates a trustline to the Issuer for USD", status: "running", transactionType: "TrustSet" });
 
@@ -137,11 +137,11 @@ async function step3_lenderTrustline(ctx: FlowContext, emit: EmitFn): Promise<vo
     const txResult = (result.result.meta as any)?.TransactionResult || "unknown";
 
     addReport(ctx,
-      "=".repeat(70), "STEP 3: LENDER CREATES USD TRUSTLINE", "=".repeat(70),
-      `TX Hash:  ${signed.hash}`, `Result:   ${txResult}`, `Account:  ${ctx.lender.address}`, `Issuer:   ${ctx.issuer.address}`, `Currency: USD`, `Limit:    100,000`, ""
+      "=".repeat(70), "LENDER CREATES USD TRUSTLINE", "=".repeat(70),
+      `TX Hash:  ${signed.hash}`, `Result:   ${txResult}`, ""
     );
 
-    emitStep(emit, { id: stepId, title: "Lender Creates USD Trustline", description: "Lender can now hold USD issued by the Issuer", status: txResult === "tesSUCCESS" ? "success" : "error", transactionHash: signed.hash, transactionType: "TrustSet", details: { "Result": txResult, "Currency": "USD", "Limit": "100,000", "Issuer": ctx.issuer.address }, error: txResult !== "tesSUCCESS" ? `TrustSet failed: ${txResult}` : undefined });
+    emitStep(emit, { id: stepId, title: "Lender Creates USD Trustline", description: "Lender can now hold USD issued by the Issuer", status: txResult === "tesSUCCESS" ? "success" : "error", transactionHash: signed.hash, transactionType: "TrustSet", details: { "Result": txResult, "Currency": "USD", "Limit": "100,000" }, error: txResult !== "tesSUCCESS" ? `TrustSet failed: ${txResult}` : undefined });
 
     if (txResult !== "tesSUCCESS") throw new Error(`TrustSet failed: ${txResult}`);
   } catch (err: any) {
@@ -150,8 +150,8 @@ async function step3_lenderTrustline(ctx: FlowContext, emit: EmitFn): Promise<vo
   }
 }
 
-async function step4_issuerSendsUSD(ctx: FlowContext, emit: EmitFn): Promise<void> {
-  const stepId = "issuer-sends-usd";
+async function step_issuerSendsUSDLender(ctx: FlowContext, emit: EmitFn): Promise<void> {
+  const stepId = "issuer-sends-usd-lender";
   emitStep(emit, { id: stepId, title: "Issuer Sends USD to Lender", description: "Issuer sends 10,000 USD to the Lender's wallet", status: "running", transactionType: "Payment" });
 
   try {
@@ -170,11 +170,11 @@ async function step4_issuerSendsUSD(ctx: FlowContext, emit: EmitFn): Promise<voi
     emitParty(emit, { role: "lender", usdBalance: "10,000 USD" });
 
     addReport(ctx,
-      "=".repeat(70), "STEP 4: ISSUER SENDS USD TO LENDER", "=".repeat(70),
-      `TX Hash:     ${signed.hash}`, `Result:      ${txResult}`, `From:        ${ctx.issuer.address} (Issuer)`, `To:          ${ctx.lender.address} (Lender)`, `Amount:      10,000 USD`, ""
+      "=".repeat(70), "ISSUER SENDS USD TO LENDER", "=".repeat(70),
+      `TX Hash: ${signed.hash}`, `Result:  ${txResult}`, `Amount:  10,000 USD`, ""
     );
 
-    emitStep(emit, { id: stepId, title: "Issuer Sends USD to Lender", description: "10,000 USD sent to Lender", status: txResult === "tesSUCCESS" ? "success" : "error", transactionHash: signed.hash, transactionType: "Payment", details: { "Result": txResult, "Amount": "10,000 USD", "From": "Issuer", "To": "Lender" }, error: txResult !== "tesSUCCESS" ? `Payment failed: ${txResult}` : undefined });
+    emitStep(emit, { id: stepId, title: "Issuer Sends USD to Lender", description: "10,000 USD sent to Lender", status: txResult === "tesSUCCESS" ? "success" : "error", transactionHash: signed.hash, transactionType: "Payment", details: { "Result": txResult, "Amount": "10,000 USD" }, error: txResult !== "tesSUCCESS" ? `Payment failed: ${txResult}` : undefined });
 
     if (txResult !== "tesSUCCESS") throw new Error(`Payment failed: ${txResult}`);
   } catch (err: any) {
@@ -183,7 +183,37 @@ async function step4_issuerSendsUSD(ctx: FlowContext, emit: EmitFn): Promise<voi
   }
 }
 
-async function step4b_issuerSendsUSDBroker(ctx: FlowContext, emit: EmitFn): Promise<void> {
+async function step_brokerTrustline(ctx: FlowContext, emit: EmitFn): Promise<void> {
+  const stepId = "broker-trustline";
+  emitStep(emit, { id: stepId, title: "Broker Creates USD Trustline", description: "Broker creates a trustline to the Issuer for USD", status: "running", transactionType: "TrustSet" });
+
+  try {
+    const trustSetTx: xrpl.TrustSet = {
+      TransactionType: "TrustSet",
+      Account: ctx.broker.address,
+      LimitAmount: { currency: "USD", issuer: ctx.issuer.address, value: "100000" },
+    };
+
+    const prepared = await ctx.client.autofill(trustSetTx);
+    const signed = ctx.broker.wallet.sign(prepared);
+    const result = await ctx.client.submitAndWait(signed.tx_blob);
+    const txResult = (result.result.meta as any)?.TransactionResult || "unknown";
+
+    addReport(ctx,
+      "=".repeat(70), "BROKER CREATES USD TRUSTLINE", "=".repeat(70),
+      `TX Hash: ${signed.hash}`, `Result:  ${txResult}`, ""
+    );
+
+    emitStep(emit, { id: stepId, title: "Broker Creates USD Trustline", description: "Broker can now interact with USD", status: txResult === "tesSUCCESS" ? "success" : "error", transactionHash: signed.hash, transactionType: "TrustSet", details: { "Result": txResult }, error: txResult !== "tesSUCCESS" ? `TrustSet failed: ${txResult}` : undefined });
+
+    if (txResult !== "tesSUCCESS") throw new Error(`TrustSet failed: ${txResult}`);
+  } catch (err: any) {
+    emitStep(emit, { id: stepId, title: "Broker Creates USD Trustline", description: "Failed", status: "error", error: err.message });
+    throw err;
+  }
+}
+
+async function step_issuerSendsUSDBroker(ctx: FlowContext, emit: EmitFn): Promise<void> {
   const stepId = "issuer-sends-usd-broker";
   emitStep(emit, { id: stepId, title: "Issuer Sends USD to Broker", description: "Issuer sends 1,000 USD to Broker for first-loss capital", status: "running", transactionType: "Payment" });
 
@@ -203,11 +233,11 @@ async function step4b_issuerSendsUSDBroker(ctx: FlowContext, emit: EmitFn): Prom
     emitParty(emit, { role: "broker", usdBalance: "1,000 USD" });
 
     addReport(ctx,
-      "=".repeat(70), "STEP 4b: ISSUER SENDS USD TO BROKER (for first-loss capital)", "=".repeat(70),
-      `TX Hash:     ${signed.hash}`, `Result:      ${txResult}`, `From:        ${ctx.issuer.address} (Issuer)`, `To:          ${ctx.broker.address} (Broker)`, `Amount:      1,000 USD`, ""
+      "=".repeat(70), "ISSUER SENDS USD TO BROKER (for cover)", "=".repeat(70),
+      `TX Hash: ${signed.hash}`, `Result:  ${txResult}`, `Amount:  1,000 USD`, ""
     );
 
-    emitStep(emit, { id: stepId, title: "Issuer Sends USD to Broker", description: "1,000 USD sent to Broker for cover", status: txResult === "tesSUCCESS" ? "success" : "error", transactionHash: signed.hash, transactionType: "Payment", details: { "Result": txResult, "Amount": "1,000 USD", "From": "Issuer", "To": "Broker" }, error: txResult !== "tesSUCCESS" ? `Payment failed: ${txResult}` : undefined });
+    emitStep(emit, { id: stepId, title: "Issuer Sends USD to Broker", description: "1,000 USD sent to Broker for cover", status: txResult === "tesSUCCESS" ? "success" : "error", transactionHash: signed.hash, transactionType: "Payment", details: { "Result": txResult, "Amount": "1,000 USD" }, error: txResult !== "tesSUCCESS" ? `Payment failed: ${txResult}` : undefined });
 
     if (txResult !== "tesSUCCESS") throw new Error(`Payment to Broker failed: ${txResult}`);
   } catch (err: any) {
@@ -216,37 +246,7 @@ async function step4b_issuerSendsUSDBroker(ctx: FlowContext, emit: EmitFn): Prom
   }
 }
 
-async function step5_brokerTrustline(ctx: FlowContext, emit: EmitFn): Promise<void> {
-  const stepId = "broker-trustline";
-  emitStep(emit, { id: stepId, title: "Broker Creates USD Trustline", description: "Broker creates a trustline to the Issuer for USD (needed for vault operations)", status: "running", transactionType: "TrustSet" });
-
-  try {
-    const trustSetTx: xrpl.TrustSet = {
-      TransactionType: "TrustSet",
-      Account: ctx.broker.address,
-      LimitAmount: { currency: "USD", issuer: ctx.issuer.address, value: "100000" },
-    };
-
-    const prepared = await ctx.client.autofill(trustSetTx);
-    const signed = ctx.broker.wallet.sign(prepared);
-    const result = await ctx.client.submitAndWait(signed.tx_blob);
-    const txResult = (result.result.meta as any)?.TransactionResult || "unknown";
-
-    addReport(ctx,
-      "=".repeat(70), "STEP 5: BROKER CREATES USD TRUSTLINE", "=".repeat(70),
-      `TX Hash:  ${signed.hash}`, `Result:   ${txResult}`, `Account:  ${ctx.broker.address}`, `Currency: USD`, ""
-    );
-
-    emitStep(emit, { id: stepId, title: "Broker Creates USD Trustline", description: "Broker can now interact with USD", status: txResult === "tesSUCCESS" ? "success" : "error", transactionHash: signed.hash, transactionType: "TrustSet", details: { "Result": txResult }, error: txResult !== "tesSUCCESS" ? `TrustSet failed: ${txResult}` : undefined });
-
-    if (txResult !== "tesSUCCESS") throw new Error(`TrustSet failed: ${txResult}`);
-  } catch (err: any) {
-    emitStep(emit, { id: stepId, title: "Broker Creates USD Trustline", description: "Failed", status: "error", error: err.message });
-    throw err;
-  }
-}
-
-async function step6_createVault(ctx: FlowContext, emit: EmitFn): Promise<void> {
+async function step_createVault(ctx: FlowContext, emit: EmitFn): Promise<void> {
   const stepId = "create-vault";
   emitStep(emit, { id: stepId, title: "Broker Creates USD Vault", description: "Broker creates a Single Asset Vault (XLS-65) for USD", status: "running", transactionType: "VaultCreate" });
 
@@ -277,9 +277,8 @@ async function step6_createVault(ctx: FlowContext, emit: EmitFn): Promise<void> 
     emit({ type: "state_update", data: { vaultId } });
 
     addReport(ctx,
-      "=".repeat(70), "STEP 6: BROKER CREATES USD VAULT (XLS-65 VaultCreate)", "=".repeat(70),
-      `TX Hash:   ${signed.hash}`, `Result:    ${txResult}`, `Account:   ${ctx.broker.address} (Broker)`, `Vault ID:  ${vaultId || "N/A"}`, `Asset:     USD (issuer: ${ctx.issuer.address})`, `Max:       100,000 USD`, "",
-      "Affected Nodes:", JSON.stringify(affectedNodes, null, 2), ""
+      "=".repeat(70), "BROKER CREATES USD VAULT (XLS-65 VaultCreate)", "=".repeat(70),
+      `TX Hash:  ${signed.hash}`, `Result:   ${txResult}`, `Vault ID: ${vaultId || "N/A"}`, ""
     );
 
     emitStep(emit, { id: stepId, title: "Broker Creates USD Vault", description: vaultId ? `Vault created: ${vaultId.slice(0, 12)}...` : "Vault creation submitted", status: txResult === "tesSUCCESS" ? "success" : "error", transactionHash: signed.hash, transactionType: "VaultCreate", details: { "Result": txResult, "Vault ID": vaultId || "N/A", "Asset": "USD", "Max Capacity": "100,000" }, error: txResult !== "tesSUCCESS" ? `VaultCreate failed: ${txResult}` : undefined });
@@ -291,7 +290,7 @@ async function step6_createVault(ctx: FlowContext, emit: EmitFn): Promise<void> 
   }
 }
 
-async function step7_createLoanBroker(ctx: FlowContext, emit: EmitFn): Promise<void> {
+async function step_createLoanBroker(ctx: FlowContext, emit: EmitFn): Promise<void> {
   const stepId = "create-loan-broker";
   emitStep(emit, { id: stepId, title: "Broker Creates LoanBroker", description: "Broker creates the LoanBroker entry (XLS-66 LoanBrokerSet)", status: "running", transactionType: "LoanBrokerSet" });
 
@@ -320,9 +319,8 @@ async function step7_createLoanBroker(ctx: FlowContext, emit: EmitFn): Promise<v
     emit({ type: "state_update", data: { loanBrokerId } });
 
     addReport(ctx,
-      "=".repeat(70), "STEP 7: BROKER CREATES LOANBROKER (XLS-66 LoanBrokerSet)", "=".repeat(70),
-      `TX Hash:         ${signed.hash}`, `Result:          ${txResult}`, `Account:         ${ctx.broker.address} (Broker)`, `Vault ID:        ${ctx.vaultId}`, `LoanBroker ID:   ${loanBrokerId || "N/A"}`, "",
-      "Affected Nodes:", JSON.stringify(affectedNodes, null, 2), ""
+      "=".repeat(70), "BROKER CREATES LOANBROKER (XLS-66 LoanBrokerSet)", "=".repeat(70),
+      `TX Hash:        ${signed.hash}`, `Result:         ${txResult}`, `LoanBroker ID:  ${loanBrokerId || "N/A"}`, `Vault ID:       ${ctx.vaultId}`, ""
     );
 
     emitStep(emit, { id: stepId, title: "Broker Creates LoanBroker", description: loanBrokerId ? `LoanBroker: ${loanBrokerId.slice(0, 12)}...` : "LoanBrokerSet submitted", status: txResult === "tesSUCCESS" ? "success" : "error", transactionHash: signed.hash, transactionType: "LoanBrokerSet", details: { "Result": txResult, "LoanBroker ID": loanBrokerId || "N/A", "Vault ID": ctx.vaultId }, error: txResult !== "tesSUCCESS" ? `LoanBrokerSet failed: ${txResult}` : undefined });
@@ -334,7 +332,7 @@ async function step7_createLoanBroker(ctx: FlowContext, emit: EmitFn): Promise<v
   }
 }
 
-async function step8_lenderDeposits(ctx: FlowContext, emit: EmitFn): Promise<void> {
+async function step_lenderDeposits(ctx: FlowContext, emit: EmitFn): Promise<void> {
   const stepId = "lender-deposits";
   emitStep(emit, { id: stepId, title: "Lender Deposits USD in Vault", description: "Lender deposits 5,000 USD into the Vault (XLS-65 VaultDeposit)", status: "running", transactionType: "VaultDeposit" });
 
@@ -354,9 +352,8 @@ async function step8_lenderDeposits(ctx: FlowContext, emit: EmitFn): Promise<voi
     emitParty(emit, { role: "lender", usdBalance: "5,000 USD (5,000 in Vault)" });
 
     addReport(ctx,
-      "=".repeat(70), "STEP 8: LENDER DEPOSITS USD INTO VAULT (XLS-65 VaultDeposit)", "=".repeat(70),
-      `TX Hash:    ${signed.hash}`, `Result:     ${txResult}`, `Account:    ${ctx.lender.address} (Lender)`, `Vault ID:   ${ctx.vaultId}`, `Amount:     5,000 USD`, "",
-      "Affected Nodes:", JSON.stringify((result.result.meta as any)?.AffectedNodes || [], null, 2), ""
+      "=".repeat(70), "LENDER DEPOSITS USD INTO VAULT (XLS-65 VaultDeposit)", "=".repeat(70),
+      `TX Hash:  ${signed.hash}`, `Result:   ${txResult}`, `Amount:   5,000 USD`, `Vault ID: ${ctx.vaultId}`, ""
     );
 
     emitStep(emit, { id: stepId, title: "Lender Deposits USD in Vault", description: "5,000 USD deposited into the Vault", status: txResult === "tesSUCCESS" ? "success" : "error", transactionHash: signed.hash, transactionType: "VaultDeposit", details: { "Result": txResult, "Amount": "5,000 USD", "Vault ID": ctx.vaultId }, error: txResult !== "tesSUCCESS" ? `VaultDeposit failed: ${txResult}` : undefined });
@@ -368,7 +365,7 @@ async function step8_lenderDeposits(ctx: FlowContext, emit: EmitFn): Promise<voi
   }
 }
 
-async function step9_borrowerTrustline(ctx: FlowContext, emit: EmitFn): Promise<void> {
+async function step_borrowerTrustline(ctx: FlowContext, emit: EmitFn): Promise<void> {
   const stepId = "borrower-trustline";
   emitStep(emit, { id: stepId, title: "Borrower Creates USD Trustline", description: "Borrower creates a trustline to Issuer for USD so they can receive the loan", status: "running", transactionType: "TrustSet" });
 
@@ -385,8 +382,8 @@ async function step9_borrowerTrustline(ctx: FlowContext, emit: EmitFn): Promise<
     const txResult = (result.result.meta as any)?.TransactionResult || "unknown";
 
     addReport(ctx,
-      "=".repeat(70), "STEP 9: BORROWER CREATES USD TRUSTLINE", "=".repeat(70),
-      `TX Hash:  ${signed.hash}`, `Result:   ${txResult}`, `Account:  ${ctx.borrower.address} (Borrower)`, `Currency: USD`, `Issuer:   ${ctx.issuer.address}`, ""
+      "=".repeat(70), "BORROWER CREATES USD TRUSTLINE", "=".repeat(70),
+      `TX Hash: ${signed.hash}`, `Result:  ${txResult}`, ""
     );
 
     emitStep(emit, { id: stepId, title: "Borrower Creates USD Trustline", description: "Borrower can now receive USD", status: txResult === "tesSUCCESS" ? "success" : "error", transactionHash: signed.hash, transactionType: "TrustSet", details: { "Result": txResult }, error: txResult !== "tesSUCCESS" ? `TrustSet failed: ${txResult}` : undefined });
@@ -398,7 +395,7 @@ async function step9_borrowerTrustline(ctx: FlowContext, emit: EmitFn): Promise<
   }
 }
 
-async function step10_brokerCoverDeposit(ctx: FlowContext, emit: EmitFn): Promise<void> {
+async function step_brokerCoverDeposit(ctx: FlowContext, emit: EmitFn): Promise<void> {
   const stepId = "broker-cover-deposit";
   emitStep(emit, { id: stepId, title: "Broker Deposits First-Loss Capital", description: "Broker deposits first-loss capital to enable loan issuance (LoanBrokerCoverDeposit)", status: "running", transactionType: "LoanBrokerCoverDeposit" });
 
@@ -416,11 +413,8 @@ async function step10_brokerCoverDeposit(ctx: FlowContext, emit: EmitFn): Promis
     const txResult = (result.result.meta as any)?.TransactionResult || "unknown";
 
     addReport(ctx,
-      "=".repeat(70), "STEP 10: BROKER DEPOSITS FIRST-LOSS CAPITAL (LoanBrokerCoverDeposit)", "=".repeat(70),
-      `TX Hash:        ${signed.hash}`, `Result:         ${txResult}`, `Account:        ${ctx.broker.address} (Broker)`, `LoanBroker ID:  ${ctx.loanBrokerId}`, `Cover Amount:   500 USD`, "",
-      "First-loss capital protects depositors from loan defaults.",
-      "Without sufficient cover, the loan broker cannot issue new loans.", "",
-      "Affected Nodes:", JSON.stringify((result.result.meta as any)?.AffectedNodes || [], null, 2), ""
+      "=".repeat(70), "BROKER DEPOSITS FIRST-LOSS CAPITAL (LoanBrokerCoverDeposit)", "=".repeat(70),
+      `TX Hash:       ${signed.hash}`, `Result:        ${txResult}`, `Cover Amount:  500 USD`, ""
     );
 
     emitStep(emit, { id: stepId, title: "Broker Deposits First-Loss Capital", description: "500 USD deposited as first-loss capital", status: txResult === "tesSUCCESS" ? "success" : "error", transactionHash: signed.hash, transactionType: "LoanBrokerCoverDeposit", details: { "Result": txResult, "Cover Amount": "500 USD", "LoanBroker ID": ctx.loanBrokerId }, error: txResult !== "tesSUCCESS" ? `LoanBrokerCoverDeposit failed: ${txResult}` : undefined });
@@ -432,32 +426,25 @@ async function step10_brokerCoverDeposit(ctx: FlowContext, emit: EmitFn): Promis
   }
 }
 
-async function step11_loanSetWithCounterparty(ctx: FlowContext, emit: EmitFn): Promise<void> {
+async function step_loanSet(ctx: FlowContext, emit: EmitFn): Promise<void> {
   const stepId = "loan-set-countersign";
   emitStep(emit, { id: stepId, title: "Create Loan with CounterpartySignature", description: "Broker creates LoanSet; Borrower co-signs via CounterpartySignature field", status: "running", transactionType: "LoanSet" });
 
   try {
     addReport(ctx,
-      "=".repeat(70), "STEP 11: CREATE LOAN WITH COUNTERPARTY SIGNATURE (XLS-66 LoanSet)", "=".repeat(70),
-      "", "--- Pre-flight: Querying Vault & LoanBroker State ---"
+      "=".repeat(70), "CREATE LOAN WITH COUNTERPARTY SIGNATURE (XLS-66 LoanSet)", "=".repeat(70), ""
     );
 
     try {
-      const vaultObj = await ctx.client.request({
-        command: "ledger_entry",
-        index: ctx.vaultId,
-      } as any);
-      addReport(ctx, "Vault State:", JSON.stringify(vaultObj.result?.node || vaultObj.result, null, 2), "");
+      const vaultObj = await ctx.client.request({ command: "ledger_entry", index: ctx.vaultId } as any);
+      addReport(ctx, "Pre-flight Vault State:", JSON.stringify(vaultObj.result?.node || vaultObj.result, null, 2), "");
     } catch (e: any) {
       addReport(ctx, `Vault query failed: ${e.message}`, "");
     }
 
     try {
-      const loanBrokerObj = await ctx.client.request({
-        command: "ledger_entry",
-        index: ctx.loanBrokerId,
-      } as any);
-      addReport(ctx, "LoanBroker State:", JSON.stringify(loanBrokerObj.result?.node || loanBrokerObj.result, null, 2), "");
+      const loanBrokerObj = await ctx.client.request({ command: "ledger_entry", index: ctx.loanBrokerId } as any);
+      addReport(ctx, "Pre-flight LoanBroker State:", JSON.stringify(loanBrokerObj.result?.node || loanBrokerObj.result, null, 2), "");
     } catch (e: any) {
       addReport(ctx, `LoanBroker query failed: ${e.message}`, "");
     }
@@ -475,27 +462,16 @@ async function step11_loanSetWithCounterparty(ctx: FlowContext, emit: EmitFn): P
 
     const prepared = await ctx.client.autofill(loanSetTx as any);
 
-    addReport(ctx,
-      "--- LoanSet Transaction (autofilled, before signing) ---", JSON.stringify(prepared, null, 2), ""
-    );
+    addReport(ctx, "LoanSet Transaction (autofilled):", JSON.stringify(prepared, null, 2), "");
 
-    addReport(ctx, "--- Step A: Broker signs the LoanSet first ---");
     const brokerSigned = ctx.broker.wallet.sign(prepared);
-    addReport(ctx, `Broker signed TX hash: ${brokerSigned.hash}`, `Broker signed TX blob (first 80 chars): ${brokerSigned.tx_blob.slice(0, 80)}...`, "");
-
-    addReport(ctx,
-      "--- Step B: Borrower co-signs via signLoanSetByCounterparty ---",
-      "The borrower signs the broker-signed transaction blob to add their",
-      "CounterpartySignature, proving they agree to the loan terms.", ""
-    );
+    addReport(ctx, `Broker signed TX hash: ${brokerSigned.hash}`, "");
 
     const counterpartySigned = (xrpl as any).signLoanSetByCounterparty(
       ctx.borrower.wallet,
       brokerSigned.tx_blob
     );
-    addReport(ctx, `Counterparty signed TX hash: ${counterpartySigned.hash}`, `CounterpartySignature added with borrower pubkey: ${ctx.borrower.wallet.publicKey}`, "");
-
-    addReport(ctx, "--- Step C: Submit co-signed transaction to network ---");
+    addReport(ctx, `Counterparty signed TX hash: ${counterpartySigned.hash}`, "");
 
     const result = await ctx.client.submitAndWait(counterpartySigned.tx_blob);
     const txResult = (result.result.meta as any)?.TransactionResult || "unknown";
@@ -513,42 +489,318 @@ async function step11_loanSetWithCounterparty(ctx: FlowContext, emit: EmitFn): P
     ctx.loanId = loanId;
 
     addReport(ctx,
-      `TX Hash:       ${txHash}`, `Result:        ${txResult}`, `Loan ID:       ${loanId || "N/A"}`, "",
-      "Affected Nodes:", JSON.stringify(affectedNodes, null, 2), "",
-      "=== COUNTERPARTY SIGNATURE FLOW EXPLANATION ===",
-      "1. Broker creates a LoanSet transaction with Counterparty = Borrower",
-      "2. The transaction is autofilled by the client (Sequence, Fee, etc.)",
-      "3. Broker signs the transaction first (regular wallet.sign())",
-      "4. Borrower co-signs using xrpl.signLoanSetByCounterparty(wallet, tx_blob)",
-      "5. This adds CounterpartySignature { SigningPubKey, TxnSignature } to the tx",
-      "6. The co-signed transaction is submitted to the ledger",
-      "7. The ledger verifies both: Broker's TxnSignature AND CounterpartySignature",
-      "8. This proves both parties agreed to the loan terms", ""
+      `TX Hash:  ${txHash}`, `Result:   ${txResult}`, `Loan ID:  ${loanId || "N/A"}`, "",
+      "Co-signing: Broker signs first, then Borrower co-signs via signLoanSetByCounterparty", ""
     );
 
     if (txResult === "tesSUCCESS") {
       emitParty(emit, { role: "borrower", usdBalance: "1,000 USD (loan)" });
     }
 
-    emitStep(emit, { id: stepId, title: "Create Loan with CounterpartySignature", description: loanId ? `Loan created: ${loanId.slice(0, 12)}... | Borrower receives 1,000 USD` : `LoanSet submitted: ${txResult}`, status: txResult === "tesSUCCESS" ? "success" : "error", transactionHash: txHash, transactionType: "LoanSet", details: { "Result": txResult, "Loan ID": loanId || "N/A", "Principal Requested": "1,000 USD", "Interest Rate": "5% (500 basis points)", "Payment Interval": "3600 seconds (1 hour)", "Payment Total": "12 payments", "Co-Sign Method": "signLoanSetByCounterparty (Broker signs first, Borrower co-signs)", "Counterparty": ctx.borrower.address }, error: txResult !== "tesSUCCESS" ? `LoanSet failed: ${txResult}` : undefined });
+    emitStep(emit, { id: stepId, title: "Create Loan with CounterpartySignature", description: loanId ? `Loan created: ${loanId.slice(0, 12)}... | Borrower receives 1,000 USD` : `LoanSet submitted: ${txResult}`, status: txResult === "tesSUCCESS" ? "success" : "error", transactionHash: txHash, transactionType: "LoanSet", details: { "Result": txResult, "Loan ID": loanId || "N/A", "Principal Requested": "1,000 USD", "Interest Rate": "5% (500 basis points)", "Payment Interval": "3600s (1 hour)", "Payment Total": "12 payments", "Co-Sign Method": "signLoanSetByCounterparty", "Counterparty": ctx.borrower.address }, error: txResult !== "tesSUCCESS" ? `LoanSet failed: ${txResult}` : undefined });
 
     if (txResult !== "tesSUCCESS") throw new Error(`LoanSet failed: ${txResult}`);
   } catch (err: any) {
-    addReport(ctx, "", `ERROR: ${err.message}`, "",
-      "If LoanSet failed, common reasons:",
-      "- The lending protocol amendment (XLS-66) may not be enabled on this network",
-      "- The LoanBrokerID may be incorrect",
-      "- The vault may not have enough funds for the requested principal",
-      "- CounterpartySignature format may be incorrect",
-      "- Counterparty account may need a USD trustline", ""
-    );
-
+    addReport(ctx, `ERROR: ${err.message}`, "");
     emitStep(emit, { id: stepId, title: "Create Loan with CounterpartySignature", description: "Failed - see error details", status: "error", transactionType: "LoanSet", error: err.message });
     throw err;
   }
 }
 
-async function step12_verifyStates(ctx: FlowContext, emit: EmitFn): Promise<void> {
+async function step_fundBorrowerForRepayment(ctx: FlowContext, emit: EmitFn): Promise<void> {
+  const stepId = "fund-borrower-repayment";
+  emitStep(emit, { id: stepId, title: "Fund Borrower for Repayment", description: "Issuer sends additional USD to Borrower so they can repay principal + interest", status: "running", transactionType: "Payment" });
+
+  try {
+    const paymentTx: xrpl.Payment = {
+      TransactionType: "Payment",
+      Account: ctx.issuer.address,
+      Destination: ctx.borrower.address,
+      Amount: { currency: "USD", issuer: ctx.issuer.address, value: "500" },
+    };
+
+    const prepared = await ctx.client.autofill(paymentTx);
+    const signed = ctx.issuer.wallet.sign(prepared);
+    const result = await ctx.client.submitAndWait(signed.tx_blob);
+    const txResult = (result.result.meta as any)?.TransactionResult || "unknown";
+
+    addReport(ctx,
+      "=".repeat(70), "FUND BORROWER FOR REPAYMENT", "=".repeat(70),
+      `TX Hash: ${signed.hash}`, `Result:  ${txResult}`, `Amount:  500 USD (to cover interest on repayment)`, ""
+    );
+
+    emitStep(emit, { id: stepId, title: "Fund Borrower for Repayment", description: "500 USD sent to Borrower for interest coverage", status: txResult === "tesSUCCESS" ? "success" : "error", transactionHash: signed.hash, transactionType: "Payment", details: { "Result": txResult, "Amount": "500 USD", "Purpose": "Cover interest on loan repayment" }, error: txResult !== "tesSUCCESS" ? `Payment failed: ${txResult}` : undefined });
+
+    if (txResult !== "tesSUCCESS") throw new Error(`Borrower funding failed: ${txResult}`);
+  } catch (err: any) {
+    emitStep(emit, { id: stepId, title: "Fund Borrower for Repayment", description: "Failed", status: "error", error: err.message });
+    throw err;
+  }
+}
+
+async function step_loanPay(ctx: FlowContext, emit: EmitFn, opts?: { earlyFull?: boolean }): Promise<void> {
+  const isEarly = opts?.earlyFull;
+  const stepId = isEarly ? "loan-pay-early" : "loan-pay";
+  const title = isEarly ? "Borrower Repays Loan Early (Full)" : "Borrower Makes Loan Payment";
+  const desc = isEarly
+    ? "Borrower repays the full outstanding balance early via LoanPay"
+    : "Borrower makes a scheduled payment on the loan via LoanPay";
+
+  emitStep(emit, { id: stepId, title, description: desc, status: "running", transactionType: "LoanPay" });
+
+  try {
+    let payAmount = "100";
+
+    if (isEarly) {
+      try {
+        const loanObj = await ctx.client.request({ command: "ledger_entry", index: ctx.loanId } as any);
+        const loanNode = loanObj.result?.node as any;
+        if (loanNode?.OutstandingPrincipal) {
+          const outstanding = typeof loanNode.OutstandingPrincipal === "object"
+            ? loanNode.OutstandingPrincipal.value
+            : loanNode.OutstandingPrincipal;
+          payAmount = String(Math.ceil(parseFloat(outstanding) * 1.1));
+          addReport(ctx, `Outstanding principal: ${outstanding}`, `Paying: ${payAmount} (includes closing interest)`, "");
+        }
+      } catch (e: any) {
+        payAmount = "1100";
+        addReport(ctx, `Could not query loan state: ${e.message}. Using estimated amount: ${payAmount}`, "");
+      }
+    }
+
+    const loanPayTx = {
+      TransactionType: "LoanPay",
+      Account: ctx.borrower.address,
+      LoanID: ctx.loanId,
+      Amount: { currency: "USD", issuer: ctx.issuer.address, value: payAmount },
+    };
+
+    const prepared = await ctx.client.autofill(loanPayTx as any);
+    const signed = ctx.borrower.wallet.sign(prepared);
+    const result = await ctx.client.submitAndWait(signed.tx_blob);
+    const txResult = (result.result.meta as any)?.TransactionResult || "unknown";
+
+    addReport(ctx,
+      "=".repeat(70), isEarly ? "BORROWER REPAYS LOAN EARLY (LoanPay)" : "BORROWER MAKES LOAN PAYMENT (LoanPay)", "=".repeat(70),
+      `TX Hash:  ${signed.hash}`, `Result:   ${txResult}`, `Amount:   ${payAmount} USD`, `Loan ID:  ${ctx.loanId}`, ""
+    );
+
+    emitStep(emit, { id: stepId, title, description: `${payAmount} USD payment ${txResult === "tesSUCCESS" ? "succeeded" : "failed"}`, status: txResult === "tesSUCCESS" ? "success" : "error", transactionHash: signed.hash, transactionType: "LoanPay", details: { "Result": txResult, "Amount": `${payAmount} USD`, "Loan ID": ctx.loanId, "Type": isEarly ? "Early Full Repayment" : "Scheduled Payment" }, error: txResult !== "tesSUCCESS" ? `LoanPay failed: ${txResult}` : undefined });
+
+    if (txResult !== "tesSUCCESS") throw new Error(`LoanPay failed: ${txResult}`);
+  } catch (err: any) {
+    emitStep(emit, { id: stepId, title, description: "Failed", status: "error", error: err.message });
+    throw err;
+  }
+}
+
+async function step_loanManageDefault(ctx: FlowContext, emit: EmitFn): Promise<void> {
+  const stepId = "loan-manage-default";
+  emitStep(emit, { id: stepId, title: "Broker Defaults the Loan", description: "Broker marks the loan as defaulted via LoanManage (borrower failed to pay)", status: "running", transactionType: "LoanManage" });
+
+  try {
+    const loanManageTx = {
+      TransactionType: "LoanManage",
+      Account: ctx.broker.address,
+      LoanID: ctx.loanId,
+      Flags: 1,
+    };
+
+    const prepared = await ctx.client.autofill(loanManageTx as any);
+    const signed = ctx.broker.wallet.sign(prepared);
+    const result = await ctx.client.submitAndWait(signed.tx_blob);
+    const txResult = (result.result.meta as any)?.TransactionResult || "unknown";
+
+    addReport(ctx,
+      "=".repeat(70), "BROKER DEFAULTS THE LOAN (LoanManage)", "=".repeat(70),
+      `TX Hash:  ${signed.hash}`, `Result:   ${txResult}`, `Loan ID:  ${ctx.loanId}`,
+      "The broker marks the loan as defaulted. First-loss capital may be liquidated", "to protect vault depositors from losses.", ""
+    );
+
+    emitStep(emit, { id: stepId, title: "Broker Defaults the Loan", description: `Loan defaulted: ${txResult}`, status: txResult === "tesSUCCESS" ? "success" : "error", transactionHash: signed.hash, transactionType: "LoanManage", details: { "Result": txResult, "Loan ID": ctx.loanId, "Action": "Default (Flags: 1)", "Impact": "First-loss capital may be liquidated to cover losses" }, error: txResult !== "tesSUCCESS" ? `LoanManage failed: ${txResult}` : undefined });
+
+    if (txResult !== "tesSUCCESS") throw new Error(`LoanManage failed: ${txResult}`);
+  } catch (err: any) {
+    emitStep(emit, { id: stepId, title: "Broker Defaults the Loan", description: "Failed", status: "error", error: err.message });
+    throw err;
+  }
+}
+
+async function step_loanDelete(ctx: FlowContext, emit: EmitFn): Promise<void> {
+  const stepId = "loan-delete";
+  emitStep(emit, { id: stepId, title: "Delete Loan", description: "Deleting the matured/defaulted loan object from the ledger (LoanDelete)", status: "running", transactionType: "LoanDelete" });
+
+  try {
+    const loanDeleteTx = {
+      TransactionType: "LoanDelete",
+      Account: ctx.broker.address,
+      LoanID: ctx.loanId,
+    };
+
+    const prepared = await ctx.client.autofill(loanDeleteTx as any);
+    const signed = ctx.broker.wallet.sign(prepared);
+    const result = await ctx.client.submitAndWait(signed.tx_blob);
+    const txResult = (result.result.meta as any)?.TransactionResult || "unknown";
+
+    addReport(ctx,
+      "=".repeat(70), "DELETE LOAN (LoanDelete)", "=".repeat(70),
+      `TX Hash:  ${signed.hash}`, `Result:   ${txResult}`, `Loan ID:  ${ctx.loanId}`, ""
+    );
+
+    emitStep(emit, { id: stepId, title: "Delete Loan", description: `Loan deleted: ${txResult}`, status: txResult === "tesSUCCESS" ? "success" : "error", transactionHash: signed.hash, transactionType: "LoanDelete", details: { "Result": txResult, "Loan ID": ctx.loanId }, error: txResult !== "tesSUCCESS" ? `LoanDelete failed: ${txResult}` : undefined });
+
+    if (txResult !== "tesSUCCESS") throw new Error(`LoanDelete failed: ${txResult}`);
+  } catch (err: any) {
+    emitStep(emit, { id: stepId, title: "Delete Loan", description: "Failed", status: "error", error: err.message });
+    throw err;
+  }
+}
+
+async function step_brokerCoverWithdraw(ctx: FlowContext, emit: EmitFn): Promise<void> {
+  const stepId = "broker-cover-withdraw";
+  emitStep(emit, { id: stepId, title: "Broker Withdraws First-Loss Capital", description: "Broker withdraws remaining first-loss capital (LoanBrokerCoverWithdraw)", status: "running", transactionType: "LoanBrokerCoverWithdraw" });
+
+  try {
+    let withdrawAmount = "500";
+    try {
+      const lbObj = await ctx.client.request({ command: "ledger_entry", index: ctx.loanBrokerId } as any);
+      const lbNode = lbObj.result?.node as any;
+      if (lbNode?.CoverAvailable) {
+        const cover = typeof lbNode.CoverAvailable === "object" ? lbNode.CoverAvailable.value : lbNode.CoverAvailable;
+        withdrawAmount = cover;
+        addReport(ctx, `CoverAvailable: ${cover}`, "");
+      }
+    } catch {}
+
+    const coverWithdrawTx = {
+      TransactionType: "LoanBrokerCoverWithdraw",
+      Account: ctx.broker.address,
+      LoanBrokerID: ctx.loanBrokerId,
+      Amount: { currency: "USD", issuer: ctx.issuer.address, value: withdrawAmount },
+    };
+
+    const prepared = await ctx.client.autofill(coverWithdrawTx as any);
+    const signed = ctx.broker.wallet.sign(prepared);
+    const result = await ctx.client.submitAndWait(signed.tx_blob);
+    const txResult = (result.result.meta as any)?.TransactionResult || "unknown";
+
+    addReport(ctx,
+      "=".repeat(70), "BROKER WITHDRAWS FIRST-LOSS CAPITAL (LoanBrokerCoverWithdraw)", "=".repeat(70),
+      `TX Hash:  ${signed.hash}`, `Result:   ${txResult}`, `Amount:   ${withdrawAmount} USD`, ""
+    );
+
+    emitStep(emit, { id: stepId, title: "Broker Withdraws First-Loss Capital", description: `${withdrawAmount} USD withdrawn: ${txResult}`, status: txResult === "tesSUCCESS" ? "success" : "error", transactionHash: signed.hash, transactionType: "LoanBrokerCoverWithdraw", details: { "Result": txResult, "Amount": `${withdrawAmount} USD`, "LoanBroker ID": ctx.loanBrokerId }, error: txResult !== "tesSUCCESS" ? `LoanBrokerCoverWithdraw failed: ${txResult}` : undefined });
+
+    if (txResult !== "tesSUCCESS") throw new Error(`LoanBrokerCoverWithdraw failed: ${txResult}`);
+  } catch (err: any) {
+    emitStep(emit, { id: stepId, title: "Broker Withdraws First-Loss Capital", description: "Failed", status: "error", error: err.message });
+    throw err;
+  }
+}
+
+async function step_loanBrokerDelete(ctx: FlowContext, emit: EmitFn): Promise<void> {
+  const stepId = "loan-broker-delete";
+  emitStep(emit, { id: stepId, title: "Delete LoanBroker", description: "Deleting the LoanBroker object after all loans are cleared (LoanBrokerDelete)", status: "running", transactionType: "LoanBrokerDelete" });
+
+  try {
+    const loanBrokerDeleteTx = {
+      TransactionType: "LoanBrokerDelete",
+      Account: ctx.broker.address,
+      LoanBrokerID: ctx.loanBrokerId,
+    };
+
+    const prepared = await ctx.client.autofill(loanBrokerDeleteTx as any);
+    const signed = ctx.broker.wallet.sign(prepared);
+    const result = await ctx.client.submitAndWait(signed.tx_blob);
+    const txResult = (result.result.meta as any)?.TransactionResult || "unknown";
+
+    addReport(ctx,
+      "=".repeat(70), "DELETE LOANBROKER (LoanBrokerDelete)", "=".repeat(70),
+      `TX Hash:        ${signed.hash}`, `Result:         ${txResult}`, `LoanBroker ID:  ${ctx.loanBrokerId}`, ""
+    );
+
+    emitStep(emit, { id: stepId, title: "Delete LoanBroker", description: `LoanBroker deleted: ${txResult}`, status: txResult === "tesSUCCESS" ? "success" : "error", transactionHash: signed.hash, transactionType: "LoanBrokerDelete", details: { "Result": txResult, "LoanBroker ID": ctx.loanBrokerId }, error: txResult !== "tesSUCCESS" ? `LoanBrokerDelete failed: ${txResult}` : undefined });
+
+    if (txResult !== "tesSUCCESS") throw new Error(`LoanBrokerDelete failed: ${txResult}`);
+  } catch (err: any) {
+    emitStep(emit, { id: stepId, title: "Delete LoanBroker", description: "Failed", status: "error", error: err.message });
+    throw err;
+  }
+}
+
+async function step_vaultWithdraw(ctx: FlowContext, emit: EmitFn): Promise<void> {
+  const stepId = "vault-withdraw";
+  emitStep(emit, { id: stepId, title: "Lender Withdraws from Vault", description: "Lender withdraws their deposited funds from the Vault (VaultWithdraw)", status: "running", transactionType: "VaultWithdraw" });
+
+  try {
+    let withdrawAmount = "5000";
+    try {
+      const vaultObj = await ctx.client.request({ command: "ledger_entry", index: ctx.vaultId } as any);
+      const vaultNode = vaultObj.result?.node as any;
+      if (vaultNode?.AssetsAvailable) {
+        const avail = typeof vaultNode.AssetsAvailable === "object" ? vaultNode.AssetsAvailable.value : vaultNode.AssetsAvailable;
+        withdrawAmount = avail;
+        addReport(ctx, `Vault AssetsAvailable: ${avail}`, "");
+      }
+    } catch {}
+
+    const vaultWithdrawTx = {
+      TransactionType: "VaultWithdraw",
+      Account: ctx.lender.address,
+      VaultID: ctx.vaultId,
+      Amount: { currency: "USD", issuer: ctx.issuer.address, value: withdrawAmount },
+    };
+
+    const prepared = await ctx.client.autofill(vaultWithdrawTx as any);
+    const signed = ctx.lender.wallet.sign(prepared);
+    const result = await ctx.client.submitAndWait(signed.tx_blob);
+    const txResult = (result.result.meta as any)?.TransactionResult || "unknown";
+
+    addReport(ctx,
+      "=".repeat(70), "LENDER WITHDRAWS FROM VAULT (VaultWithdraw)", "=".repeat(70),
+      `TX Hash:  ${signed.hash}`, `Result:   ${txResult}`, `Amount:   ${withdrawAmount} USD`, `Vault ID: ${ctx.vaultId}`, ""
+    );
+
+    emitStep(emit, { id: stepId, title: "Lender Withdraws from Vault", description: `${withdrawAmount} USD withdrawn: ${txResult}`, status: txResult === "tesSUCCESS" ? "success" : "error", transactionHash: signed.hash, transactionType: "VaultWithdraw", details: { "Result": txResult, "Amount": `${withdrawAmount} USD`, "Vault ID": ctx.vaultId }, error: txResult !== "tesSUCCESS" ? `VaultWithdraw failed: ${txResult}` : undefined });
+
+    if (txResult !== "tesSUCCESS") throw new Error(`VaultWithdraw failed: ${txResult}`);
+  } catch (err: any) {
+    emitStep(emit, { id: stepId, title: "Lender Withdraws from Vault", description: "Failed", status: "error", error: err.message });
+    throw err;
+  }
+}
+
+async function step_vaultDelete(ctx: FlowContext, emit: EmitFn): Promise<void> {
+  const stepId = "vault-delete";
+  emitStep(emit, { id: stepId, title: "Delete Vault", description: "Deleting the Vault object after all funds withdrawn (VaultDelete)", status: "running", transactionType: "VaultDelete" });
+
+  try {
+    const vaultDeleteTx = {
+      TransactionType: "VaultDelete",
+      Account: ctx.broker.address,
+      VaultID: ctx.vaultId,
+    };
+
+    const prepared = await ctx.client.autofill(vaultDeleteTx as any);
+    const signed = ctx.broker.wallet.sign(prepared);
+    const result = await ctx.client.submitAndWait(signed.tx_blob);
+    const txResult = (result.result.meta as any)?.TransactionResult || "unknown";
+
+    addReport(ctx,
+      "=".repeat(70), "DELETE VAULT (VaultDelete)", "=".repeat(70),
+      `TX Hash:  ${signed.hash}`, `Result:   ${txResult}`, `Vault ID: ${ctx.vaultId}`, ""
+    );
+
+    emitStep(emit, { id: stepId, title: "Delete Vault", description: `Vault deleted: ${txResult}`, status: txResult === "tesSUCCESS" ? "success" : "error", transactionHash: signed.hash, transactionType: "VaultDelete", details: { "Result": txResult, "Vault ID": ctx.vaultId }, error: txResult !== "tesSUCCESS" ? `VaultDelete failed: ${txResult}` : undefined });
+
+    if (txResult !== "tesSUCCESS") throw new Error(`VaultDelete failed: ${txResult}`);
+  } catch (err: any) {
+    emitStep(emit, { id: stepId, title: "Delete Vault", description: "Failed", status: "error", error: err.message });
+    throw err;
+  }
+}
+
+async function step_verifyStates(ctx: FlowContext, emit: EmitFn): Promise<void> {
   const stepId = "verify-states";
   emitStep(emit, { id: stepId, title: "Verify Final States", description: "Querying account balances and ledger objects to verify the flow", status: "running", transactionType: "Verification" });
 
@@ -574,8 +826,7 @@ async function step12_verifyStates(ctx: FlowContext, emit: EmitFn): Promise<void
         if (usdLine) {
           details[`${label} USD Balance`] = usdLine.balance;
         }
-      } catch {
-      }
+      } catch {}
     }
 
     if (ctx.vaultId) {
@@ -583,7 +834,7 @@ async function step12_verifyStates(ctx: FlowContext, emit: EmitFn): Promise<void
         const vaultObj = await ctx.client.request({ command: "ledger_entry", index: ctx.vaultId, ledger_index: "validated" });
         details["Vault Object"] = JSON.stringify(vaultObj.result.node, null, 2);
       } catch {
-        details["Vault Object"] = "Could not fetch";
+        details["Vault Object"] = "Deleted or not found";
       }
     }
 
@@ -592,7 +843,7 @@ async function step12_verifyStates(ctx: FlowContext, emit: EmitFn): Promise<void
         const lbObj = await ctx.client.request({ command: "ledger_entry", index: ctx.loanBrokerId, ledger_index: "validated" });
         details["LoanBroker Object"] = JSON.stringify(lbObj.result.node, null, 2);
       } catch {
-        details["LoanBroker Object"] = "Could not fetch";
+        details["LoanBroker Object"] = "Deleted or not found";
       }
     }
 
@@ -601,11 +852,11 @@ async function step12_verifyStates(ctx: FlowContext, emit: EmitFn): Promise<void
         const loanObj = await ctx.client.request({ command: "ledger_entry", index: ctx.loanId, ledger_index: "validated" });
         details["Loan Object"] = JSON.stringify(loanObj.result.node, null, 2);
       } catch {
-        details["Loan Object"] = "Could not fetch";
+        details["Loan Object"] = "Deleted or not found";
       }
     }
 
-    addReport(ctx, "=".repeat(70), "STEP 12: FINAL STATE VERIFICATION", "=".repeat(70), "");
+    addReport(ctx, "=".repeat(70), "FINAL STATE VERIFICATION", "=".repeat(70), "");
     for (const [key, val] of Object.entries(details)) {
       addReport(ctx, `${key}: ${val}`);
     }
@@ -617,7 +868,32 @@ async function step12_verifyStates(ctx: FlowContext, emit: EmitFn): Promise<void
   }
 }
 
-export async function runLendingFlow(emit: EmitFn): Promise<string> {
+async function runSharedSetup(ctx: FlowContext, emit: EmitFn): Promise<void> {
+  await step_fundWallets(ctx, emit);
+  await step_issuerSetup(ctx, emit);
+  await step_lenderTrustline(ctx, emit);
+  await step_issuerSendsUSDLender(ctx, emit);
+  await step_brokerTrustline(ctx, emit);
+  await step_issuerSendsUSDBroker(ctx, emit);
+  await step_createVault(ctx, emit);
+  await step_createLoanBroker(ctx, emit);
+  await step_lenderDeposits(ctx, emit);
+  await step_borrowerTrustline(ctx, emit);
+  await step_brokerCoverDeposit(ctx, emit);
+}
+
+function getScenarioStepCount(scenarioId: ScenarioId): number {
+  switch (scenarioId) {
+    case "loan-creation": return 13;
+    case "loan-payment": return 14;
+    case "loan-default": return 15;
+    case "early-repayment": return 16;
+    case "full-lifecycle": return 19;
+    default: return 13;
+  }
+}
+
+export async function runLendingFlow(emit: EmitFn, scenarioId: ScenarioId = "loan-creation"): Promise<string> {
   const ctx: FlowContext = {
     client: null as any,
     issuer: null as any,
@@ -630,34 +906,59 @@ export async function runLendingFlow(emit: EmitFn): Promise<string> {
   const network = "wss://s.devnet.rippletest.net:51233";
 
   addReport(ctx,
-    "=".repeat(70), "XRPL LENDING PROTOCOL - END-TO-END FLOW REPORT", "=".repeat(70),
-    `Network: ${network}`, `Started: ${new Date().toISOString()}`, ""
+    "=".repeat(70), `XRPL LENDING PROTOCOL - ${scenarioId.toUpperCase()} SCENARIO`, "=".repeat(70),
+    `Network:  ${network}`, `Scenario: ${scenarioId}`, `Started:  ${new Date().toISOString()}`, ""
   );
+
+  emit({ type: "state_update", data: { scenarioId, totalSteps: getScenarioStepCount(scenarioId) } });
 
   try {
     ctx.client = new xrpl.Client(network);
     await ctx.client.connect();
-
     addReport(ctx, `Connected to ${network}`, "");
 
-    await step1_fundWallets(ctx, emit);
-    await step2_issuerSetup(ctx, emit);
-    await step3_lenderTrustline(ctx, emit);
-    await step4_issuerSendsUSD(ctx, emit);
-    await step5_brokerTrustline(ctx, emit);
-    await step4b_issuerSendsUSDBroker(ctx, emit);
-    await step6_createVault(ctx, emit);
-    await step7_createLoanBroker(ctx, emit);
-    await step8_lenderDeposits(ctx, emit);
-    await step9_borrowerTrustline(ctx, emit);
-    await step10_brokerCoverDeposit(ctx, emit);
-    await step11_loanSetWithCounterparty(ctx, emit);
-    await step12_verifyStates(ctx, emit);
+    await runSharedSetup(ctx, emit);
+    await step_loanSet(ctx, emit);
+
+    switch (scenarioId) {
+      case "loan-creation":
+        await step_verifyStates(ctx, emit);
+        break;
+
+      case "loan-payment":
+        await step_loanPay(ctx, emit);
+        await step_verifyStates(ctx, emit);
+        break;
+
+      case "loan-default":
+        await step_loanManageDefault(ctx, emit);
+        await step_loanDelete(ctx, emit);
+        await step_verifyStates(ctx, emit);
+        break;
+
+      case "early-repayment":
+        await step_fundBorrowerForRepayment(ctx, emit);
+        await step_loanPay(ctx, emit, { earlyFull: true });
+        await step_loanDelete(ctx, emit);
+        await step_verifyStates(ctx, emit);
+        break;
+
+      case "full-lifecycle":
+        await step_loanPay(ctx, emit);
+        await step_loanManageDefault(ctx, emit);
+        await step_loanDelete(ctx, emit);
+        await step_brokerCoverWithdraw(ctx, emit);
+        await step_loanBrokerDelete(ctx, emit);
+        await step_vaultWithdraw(ctx, emit);
+        await step_vaultDelete(ctx, emit);
+        break;
+    }
 
     addReport(ctx,
       "=".repeat(70), "FLOW COMPLETED SUCCESSFULLY", "=".repeat(70),
       `Completed: ${new Date().toISOString()}`, "",
       "Summary:",
+      `- Scenario:   ${scenarioId}`,
       `- Issuer:     ${ctx.issuer.address}`,
       `- Lender:     ${ctx.lender.address}`,
       `- Borrower:   ${ctx.borrower.address}`,
@@ -668,26 +969,20 @@ export async function runLendingFlow(emit: EmitFn): Promise<string> {
     );
 
     emit({ type: "flow_complete", data: { report: ctx.report.join("\n") } });
-
     return ctx.report.join("\n");
   } catch (err: any) {
     addReport(ctx,
       "=".repeat(70), "FLOW FAILED", "=".repeat(70),
-      `Error: ${err.message}`, `Failed at: ${new Date().toISOString()}`, "",
-      "NOTE: If the error mentions unsupported transaction types,",
-      "ensure you are connecting to a devnet that has the XLS-65",
-      "(Vault) and XLS-66 (Lending Protocol) amendments enabled.", ""
+      `Error: ${err.message}`, `Failed at: ${new Date().toISOString()}`, ""
     );
 
     emit({ type: "flow_error", data: { message: err.message, report: ctx.report.join("\n") } });
-
     return ctx.report.join("\n");
   } finally {
     try {
       if (ctx.client?.isConnected()) {
         await ctx.client.disconnect();
       }
-    } catch {
-    }
+    } catch {}
   }
 }

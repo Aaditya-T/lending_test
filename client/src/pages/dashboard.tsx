@@ -25,7 +25,8 @@ import {
   Download,
   Upload,
 } from "lucide-react";
-import type { FlowState, FlowStep, Party } from "@/lib/types";
+import type { FlowState, FlowStep, Party, ScenarioId } from "@/lib/types";
+import { SCENARIOS } from "@/lib/types";
 
 const ROLE_CONFIG: Record<string, { icon: typeof Wallet; color: string; bgColor: string }> = {
   issuer: { icon: Banknote, color: "text-amber-600 dark:text-amber-400", bgColor: "bg-amber-50 dark:bg-amber-950/40" },
@@ -199,21 +200,12 @@ function StepItem({ step, index }: { step: FlowStep; index: number }) {
   );
 }
 
-function FlowDiagram() {
-  const steps = [
-    { label: "Issue USD", actor: "Issuer" },
-    { label: "Send to Lender", actor: "Issuer" },
-    { label: "Create Vault", actor: "Broker" },
-    { label: "Create LoanBroker", actor: "Broker" },
-    { label: "Deposit to Vault", actor: "Lender" },
-    { label: "Trustline USD", actor: "Borrower" },
-    { label: "Co-sign LoanSet", actor: "Both" },
-    { label: "Loan Funded", actor: "Borrower" },
-  ];
+function FlowDiagram({ scenarioId }: { scenarioId: ScenarioId }) {
+  const scenario = SCENARIOS.find(s => s.id === scenarioId) || SCENARIOS[0];
 
   return (
     <div className="flex items-center gap-1 overflow-x-auto pb-2">
-      {steps.map((s, i) => (
+      {scenario.diagramSteps.map((s, i) => (
         <div key={i} className="flex items-center gap-1 flex-shrink-0">
           <div className="flex flex-col items-center gap-1 min-w-[80px]">
             <div className="text-[10px] text-muted-foreground font-medium">{s.actor}</div>
@@ -221,7 +213,7 @@ function FlowDiagram() {
               {s.label}
             </div>
           </div>
-          {i < steps.length - 1 && <ArrowRight className="w-3 h-3 text-muted-foreground flex-shrink-0" />}
+          {i < scenario.diagramSteps.length - 1 && <ArrowRight className="w-3 h-3 text-muted-foreground flex-shrink-0" />}
         </div>
       ))}
     </div>
@@ -244,6 +236,7 @@ export default function Dashboard() {
   const [state, setState] = useState<FlowState>(initialState);
   const [rawReport, setRawReport] = useState<string>("");
   const [showReport, setShowReport] = useState(false);
+  const [selectedScenario, setSelectedScenario] = useState<ScenarioId>("loan-creation");
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleExport = useCallback(() => {
@@ -251,6 +244,7 @@ export default function Dashboard() {
     const data = {
       version: 1,
       exportedAt: new Date().toISOString(),
+      scenarioId: selectedScenario,
       state,
       report: rawReport,
     };
@@ -258,10 +252,10 @@ export default function Dashboard() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `xrpl-flow-${timestamp}.json`;
+    a.download = `xrpl-flow-${selectedScenario}-${timestamp}.json`;
     a.click();
     URL.revokeObjectURL(url);
-  }, [state, rawReport]);
+  }, [state, rawReport, selectedScenario]);
 
   const handleImport = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -277,6 +271,9 @@ export default function Dashboard() {
         setState(parsed.state);
         setRawReport(parsed.report || "");
         setShowReport(false);
+        if (parsed.scenarioId) {
+          setSelectedScenario(parsed.scenarioId);
+        }
       } catch {
         alert("Failed to parse the imported file.");
       }
@@ -286,10 +283,11 @@ export default function Dashboard() {
   }, []);
 
   const startFlow = useCallback(() => {
-    setState((prev) => ({
+    setState({
       ...initialState,
       status: "running",
-    }));
+      scenarioId: selectedScenario,
+    });
     setRawReport("");
     setShowReport(false);
 
@@ -325,14 +323,16 @@ export default function Dashboard() {
       }
     };
 
-    runLendingFlow(emit).catch((err) => {
+    runLendingFlow(emit, selectedScenario).catch((err) => {
       setState((prev) => ({ ...prev, status: "error", errorMessage: err.message }));
     });
-  }, []);
+  }, [selectedScenario]);
 
-  const TOTAL_STEPS = 12;
+  const totalSteps = state.steps.length || 13;
   const completedSteps = state.steps.filter((s) => s.status === "success").length;
-  const progress = (completedSteps / TOTAL_STEPS) * 100;
+  const progress = totalSteps > 0 ? (completedSteps / totalSteps) * 100 : 0;
+
+  const currentScenario = SCENARIOS.find(s => s.id === selectedScenario) || SCENARIOS[0];
 
   return (
     <div className="min-h-screen bg-background">
@@ -347,13 +347,14 @@ export default function Dashboard() {
               <p className="text-xs text-muted-foreground">XLS-66 Lending + XLS-65 Vault | End-to-End Flow</p>
             </div>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 flex-wrap">
             <Badge variant="outline" className="font-mono text-xs" data-testid="text-network">
               Devnet
             </Badge>
             <ThemeToggle />
             <Button
               variant="outline"
+              size="sm"
               onClick={handleExport}
               disabled={state.status === "idle"}
               data-testid="button-export-flow"
@@ -363,6 +364,7 @@ export default function Dashboard() {
             </Button>
             <Button
               variant="outline"
+              size="sm"
               onClick={() => fileInputRef.current?.click()}
               data-testid="button-import-flow"
             >
@@ -376,23 +378,6 @@ export default function Dashboard() {
               className="hidden"
               onChange={handleImport}
             />
-            <Button
-              onClick={startFlow}
-              disabled={state.status === "running"}
-              data-testid="button-run-flow"
-            >
-              {state.status === "running" ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  Running...
-                </>
-              ) : (
-                <>
-                  <Play className="w-4 h-4" />
-                  {state.status === "idle" ? "Run Full Flow" : "Run Again"}
-                </>
-              )}
-            </Button>
           </div>
         </div>
       </header>
@@ -402,15 +387,58 @@ export default function Dashboard() {
           <AlertTriangle className="w-4 h-4 flex-shrink-0" />
           <span>Run data is temporary and will be lost when you refresh the page. Use Export to save your results.</span>
         </div>
+
         <Card>
           <CardHeader className="pb-3">
             <CardTitle className="text-sm font-semibold flex items-center gap-2">
               <ArrowRight className="w-4 h-4" />
-              Protocol Flow
+              Scenario
             </CardTitle>
           </CardHeader>
-          <CardContent>
-            <FlowDiagram />
+          <CardContent className="space-y-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2">
+              {SCENARIOS.map((scenario) => (
+                <button
+                  key={scenario.id}
+                  onClick={() => {
+                    if (state.status !== "running") {
+                      setSelectedScenario(scenario.id);
+                    }
+                  }}
+                  disabled={state.status === "running"}
+                  className={`p-3 rounded-md border text-left transition-colors ${
+                    selectedScenario === scenario.id
+                      ? "border-primary bg-primary/5"
+                      : "hover-elevate"
+                  } ${state.status === "running" ? "opacity-50 cursor-not-allowed" : ""}`}
+                  data-testid={`button-scenario-${scenario.id}`}
+                >
+                  <p className="text-xs font-semibold mb-1">{scenario.name}</p>
+                  <p className="text-[10px] text-muted-foreground leading-tight">{scenario.description}</p>
+                </button>
+              ))}
+            </div>
+            <div className="flex items-center gap-3 flex-wrap">
+              <Button
+                onClick={startFlow}
+                disabled={state.status === "running"}
+                data-testid="button-run-flow"
+              >
+                {state.status === "running" ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Running {currentScenario.name}...
+                  </>
+                ) : (
+                  <>
+                    <Play className="w-4 h-4" />
+                    Run {currentScenario.name}
+                  </>
+                )}
+              </Button>
+              <p className="text-xs text-muted-foreground">{currentScenario.description}</p>
+            </div>
+            <FlowDiagram scenarioId={selectedScenario} />
           </CardContent>
         </Card>
 
@@ -428,7 +456,7 @@ export default function Dashboard() {
                   <CardTitle className="text-sm font-semibold">
                     Execution Steps
                     <span className="ml-2 text-muted-foreground font-normal">
-                      ({completedSteps}/{TOTAL_STEPS})
+                      ({completedSteps}/{state.steps.length})
                     </span>
                   </CardTitle>
                   {state.status === "running" && (
@@ -514,9 +542,9 @@ export default function Dashboard() {
               <div>
                 <h3 className="text-base font-semibold mb-1">Ready to Run</h3>
                 <p className="text-sm text-muted-foreground max-w-md">
-                  Click "Run Full Flow" to execute the entire XRPL Lending Protocol scenario.
-                  This will create 4 wallets, issue USD, set up a vault, deposit funds,
-                  and create a loan with multi-signed LoanSet transaction.
+                  Select a scenario above and click "Run" to execute on the XRPL Devnet.
+                  Each scenario creates 4 wallets, sets up the lending infrastructure,
+                  and demonstrates different parts of the XLS-66 lending protocol.
                 </p>
               </div>
             </CardContent>

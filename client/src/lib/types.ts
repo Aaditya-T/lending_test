@@ -26,6 +26,83 @@ export const partySchema = z.object({
 
 export type Party = z.infer<typeof partySchema>;
 
+export type ScenarioId = "loan-creation" | "loan-default" | "loan-payment" | "early-repayment" | "full-lifecycle";
+
+export interface ScenarioConfig {
+  id: ScenarioId;
+  name: string;
+  description: string;
+  diagramSteps: { label: string; actor: string }[];
+}
+
+export const SCENARIOS: ScenarioConfig[] = [
+  {
+    id: "loan-creation",
+    name: "Loan Creation",
+    description: "Set up all parties, create vault, deposit funds, and create a loan with CounterpartySignature co-signing",
+    diagramSteps: [
+      { label: "Fund Wallets", actor: "All" },
+      { label: "Issue USD", actor: "Issuer" },
+      { label: "Create Vault", actor: "Broker" },
+      { label: "Deposit USD", actor: "Lender" },
+      { label: "Cover Deposit", actor: "Broker" },
+      { label: "Co-sign Loan", actor: "Both" },
+      { label: "Verify", actor: "System" },
+    ],
+  },
+  {
+    id: "loan-payment",
+    name: "Loan Payment",
+    description: "Create a loan then make a scheduled payment via LoanPay transaction",
+    diagramSteps: [
+      { label: "Setup", actor: "All" },
+      { label: "Create Loan", actor: "Both" },
+      { label: "LoanPay", actor: "Borrower" },
+      { label: "Verify", actor: "System" },
+    ],
+  },
+  {
+    id: "loan-default",
+    name: "Loan Default",
+    description: "Create a loan then the broker defaults it via LoanManage, demonstrating first-loss capital protection",
+    diagramSteps: [
+      { label: "Setup", actor: "All" },
+      { label: "Create Loan", actor: "Both" },
+      { label: "Default Loan", actor: "Broker" },
+      { label: "Delete Loan", actor: "Broker" },
+      { label: "Verify", actor: "System" },
+    ],
+  },
+  {
+    id: "early-repayment",
+    name: "Early Repayment",
+    description: "Create a loan, fund borrower with extra USD for interest, then repay the full outstanding balance early",
+    diagramSteps: [
+      { label: "Setup", actor: "All" },
+      { label: "Create Loan", actor: "Both" },
+      { label: "Fund Borrower", actor: "Issuer" },
+      { label: "Early Repay", actor: "Borrower" },
+      { label: "Delete Loan", actor: "Broker" },
+      { label: "Verify", actor: "System" },
+    ],
+  },
+  {
+    id: "full-lifecycle",
+    name: "Full Lifecycle",
+    description: "Complete lending lifecycle: create loan, make payment, delete loan, withdraw cover, delete broker, withdraw vault, delete vault",
+    diagramSteps: [
+      { label: "Setup", actor: "All" },
+      { label: "Create Loan", actor: "Both" },
+      { label: "LoanPay", actor: "Borrower" },
+      { label: "Delete Loan", actor: "Broker" },
+      { label: "Withdraw Cover", actor: "Broker" },
+      { label: "Delete Broker", actor: "Broker" },
+      { label: "Vault Withdraw", actor: "Lender" },
+      { label: "Delete Vault", actor: "Broker" },
+    ],
+  },
+];
+
 export const flowStateSchema = z.object({
   status: z.enum(["idle", "running", "completed", "error"]),
   parties: z.array(partySchema),
@@ -34,10 +111,10 @@ export const flowStateSchema = z.object({
   loanBrokerId: z.string().optional(),
   loanId: z.string().optional(),
   network: z.string(),
+  scenarioId: z.string().optional(),
   startedAt: z.string().optional(),
   completedAt: z.string().optional(),
   errorMessage: z.string().optional(),
 });
 
 export type FlowState = z.infer<typeof flowStateSchema>;
-
