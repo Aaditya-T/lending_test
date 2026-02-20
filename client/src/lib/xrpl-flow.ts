@@ -1034,27 +1034,37 @@ interface BatchConfig {
 async function submitBatch(ctx: FlowContext, config: BatchConfig): Promise<{ hash: string; result: string; response: any }> {
   const { outerSigner, innerTxns, mode = 65536 } = config;
 
-  const preparedInner: Record<string, any>[] = [];
-  for (const { tx } of innerTxns) {
-    const filled = await ctx.client.autofill(tx as any);
-    const inner = filled as Record<string, any>;
-    inner.Flags = (inner.Flags || 0) | 0x40000000;
-    inner.Fee = "0";
-    inner.SigningPubKey = "";
-    delete inner.TxnSignature;
-    delete inner.LastLedgerSequence;
-    preparedInner.push(inner);
-  }
+  // Build inner transactions with only essential fields + tfInnerBatchTxn flag.
+  // Do NOT autofill inner txns individually — client.autofill() on the Batch
+  // calls autofillBatchTxn() which correctly handles:
+  //   - Sequence assignment (incrementing for same-account, offset for outer-signer)
+  //   - Fee="0", SigningPubKey="", NetworkID
+  const rawTransactions = innerTxns.map(({ tx }) => ({
+    RawTransaction: {
+      ...tx,
+      Flags: ((tx.Flags || 0) as number) | 0x40000000,
+      Fee: "0",
+      SigningPubKey: "",
+    },
+  }));
 
   const batchTx: Record<string, any> = {
     TransactionType: "Batch",
     Account: outerSigner.address,
     Flags: mode,
-    RawTransactions: preparedInner.map((tx) => ({ RawTransaction: { ...tx } })),
+    RawTransactions: rawTransactions,
   };
 
+  // autofill handles outer Sequence/Fee/LastLedgerSequence AND inner Sequences
   const prepared = await ctx.client.autofill(batchTx as any);
 
+  // Give generous LastLedgerSequence window (signing takes time)
+  if ((prepared as any).LastLedgerSequence) {
+    (prepared as any).LastLedgerSequence += 20;
+  }
+
+  // Adjust outer Fee per XLS-56 spec: (n+2)*baseFee + sum(innerTxn.Fee)
+  // where n = number of BatchSigners. autofill may not account for BatchSigners.
   const otherAccounts = new Map<string, WalletInfo>();
   for (const { account } of innerTxns) {
     if (account.address !== outerSigner.address && !otherAccounts.has(account.address)) {
@@ -1062,6 +1072,15 @@ async function submitBatch(ctx: FlowContext, config: BatchConfig): Promise<{ has
     }
   }
 
+  const batchSignerCount = otherAccounts.size;
+  if (batchSignerCount > 0) {
+    const baseFee = 10;
+    const currentFee = parseInt((prepared as any).Fee || "0", 10);
+    const adjustedFee = currentFee + (batchSignerCount * baseFee);
+    (prepared as any).Fee = String(adjustedFee);
+  }
+
+  // Single-account batch: just sign normally
   if (otherAccounts.size === 0) {
     const signed = outerSigner.wallet.sign(prepared);
     const result = await ctx.client.submitAndWait(signed.tx_blob);
@@ -1069,6 +1088,8 @@ async function submitBatch(ctx: FlowContext, config: BatchConfig): Promise<{ has
     return { hash: result.result.hash, result: txResult, response: result };
   }
 
+  // Multi-account batch: each non-outer account signs via signMultiBatch,
+  // then combine signatures, then outer account signs with wallet.sign()
   const signedCopies: string[] = [];
   otherAccounts.forEach((walletInfo, addr) => {
     const txCopy = JSON.parse(JSON.stringify(prepared));
