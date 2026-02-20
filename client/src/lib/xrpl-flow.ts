@@ -497,6 +497,7 @@ async function step_loanSet(ctx: FlowContext, emit: EmitFn): Promise<void> {
 
     if (txResult === "tesSUCCESS") {
       emitParty(emit, { role: "borrower", usdBalance: "1,000 USD (loan)" });
+      await updateLoanStats(ctx, emit);
     }
 
     emitStep(emit, { id: stepId, title: "Create Loan with CounterpartySignature", description: loanId ? `Loan created: ${loanId.slice(0, 12)}... | Borrower receives 1,000 USD` : `LoanSet submitted: ${txResult}`, status: txResult === "tesSUCCESS" ? "success" : "error", transactionHash: txHash, transactionType: "LoanSet", details: { "Result": txResult, "Loan ID": loanId || "N/A", "Principal Requested": "1,000 USD", "Interest Rate": "5% (500 basis points)", "Payment Interval": "3600s (1 hour)", "Payment Total": "12 payments", "Co-Sign Method": "signLoanSetByCounterparty", "Counterparty": ctx.borrower.address }, error: txResult !== "tesSUCCESS" ? `LoanSet failed: ${txResult}` : undefined });
@@ -652,6 +653,7 @@ async function step_loanSetMultiSig(ctx: FlowContext, emit: EmitFn): Promise<voi
 
     if (txResult === "tesSUCCESS") {
       emitParty(emit, { role: "borrower", usdBalance: "1,000 USD (loan)" });
+      await updateLoanStats(ctx, emit);
     }
 
     emitStep(emit, { id: stepId, title: "Create Loan with Multi-Sig + CounterpartySignature", description: loanId ? `Loan created: ${loanId.slice(0, 12)}... | Dual-mechanism auth` : `LoanSet submitted: ${txResult}`, status: txResult === "tesSUCCESS" ? "success" : "error", transactionHash: txHash, transactionType: "LoanSet", details: { "Result": txResult, "Loan ID": loanId || "N/A", "Principal Requested": "1,000 USD", "Interest Rate": "5% (500 basis points)", "Payment Interval": "3600s (1 hour)", "Payment Total": "12 payments", "Account Auth": "Multi-sig (Lender as broker delegate)", "Counterparty Auth": "CounterpartySignature (Borrower)", "Delegate Signer": ctx.lender.address, "Note": "Combines SignerList multi-sig + CounterpartySignature" }, error: txResult !== "tesSUCCESS" ? `LoanSet failed: ${txResult}` : undefined });
@@ -1258,6 +1260,32 @@ function getScenarioStepCount(scenarioId: ScenarioId, useBatch?: boolean): numbe
     case "full-lifecycle": return setupSteps + 8;    // +LoanSet +LoanPay +LoanManage +LoanDelete +CoverWithdraw +BrokerDelete +VaultWithdraw +VaultDelete
     case "signerlist-loan": return setupSteps + 3;   // +SignerListSet +LoanSetMultiSig +Verify
     default: return setupSteps + 2;
+  }
+}
+
+async function updateLoanStats(ctx: FlowContext, emit: EmitFn) {
+  if (!ctx.loanId) return;
+  try {
+    const response = await ctx.client.request({
+      command: "ledger_entry",
+      index: ctx.loanId,
+    } as any);
+    const loan = (response.result as any).node || (response.result as any).ledger_entry;
+    if (loan) {
+      const stats = {
+        principalPaid: loan.PrincipalPaid || "0",
+        principalRemaining: (BigInt(loan.PrincipalAmount) - BigInt(loan.PrincipalPaid || "0")).toString(),
+        interestPaid: loan.InterestPaid || "0",
+        nextPaymentAmount: loan.PaymentAmount,
+        nextPaymentDueDate: loan.NextPaymentDueDate ? new Date(loan.NextPaymentDueDate * 1000).toLocaleString() : "N/A",
+        totalPaymentsMade: loan.PaymentsMade || 0,
+        totalPaymentsRemaining: loan.PaymentsRemaining || 0,
+        status: loan.Flags & 0x00010000 ? "Defaulted" : "Active",
+      };
+      emit({ type: "state_update", data: { loanStats: stats } });
+    }
+  } catch (err) {
+    console.error("Failed to update loan stats:", err);
   }
 }
 

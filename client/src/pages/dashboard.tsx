@@ -467,6 +467,46 @@ export default function Dashboard() {
 
         {state.status !== "idle" && (
           <>
+            {state.loanStats && (
+              <Card className="border-primary/20 bg-primary/5">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm font-semibold flex items-center gap-2">
+                    <Banknote className="w-4 h-4 text-primary" />
+                    Loan Overview
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <div className="space-y-1">
+                      <p className="text-[10px] text-muted-foreground uppercase font-bold">Remaining Principal</p>
+                      <p className="text-lg font-mono font-bold text-primary">{state.loanStats.principalRemaining} USD</p>
+                      <p className="text-[10px] text-muted-foreground">Paid: {state.loanStats.principalPaid} USD</p>
+                    </div>
+                    <div className="space-y-1">
+                      <p className="text-[10px] text-muted-foreground uppercase font-bold">Next Payment</p>
+                      <p className="text-lg font-mono font-bold">{state.loanStats.nextPaymentAmount} USD</p>
+                      <p className="text-[10px] text-muted-foreground">Due: {state.loanStats.nextPaymentDueDate}</p>
+                    </div>
+                    <div className="space-y-1">
+                      <p className="text-[10px] text-muted-foreground uppercase font-bold">Payments</p>
+                      <p className="text-lg font-mono font-bold">{state.loanStats.totalPaymentsMade} / {state.loanStats.totalPaymentsMade + state.loanStats.totalPaymentsRemaining}</p>
+                      <p className="text-[10px] text-muted-foreground">{state.loanStats.totalPaymentsRemaining} remaining</p>
+                    </div>
+                    <div className="space-y-1">
+                      <p className="text-[10px] text-muted-foreground uppercase font-bold">Status</p>
+                      <Badge 
+                        variant={state.loanStats.status === "Active" ? "secondary" : "destructive"}
+                        className={state.loanStats.status === "Active" ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400" : ""}
+                      >
+                        {state.loanStats.status}
+                      </Badge>
+                      <p className="text-[10px] text-muted-foreground">Interest Paid: {state.loanStats.interestPaid} USD</p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
             <Card>
               <CardHeader className="pb-3">
                 <div className="flex items-center justify-between gap-4 flex-wrap">

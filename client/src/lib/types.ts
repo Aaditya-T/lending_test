@@ -126,6 +126,16 @@ export const flowStateSchema = z.object({
   startedAt: z.string().optional(),
   completedAt: z.string().optional(),
   errorMessage: z.string().optional(),
+  loanStats: z.object({
+    principalPaid: z.string(),
+    principalRemaining: z.string(),
+    interestPaid: z.string(),
+    nextPaymentAmount: z.string(),
+    nextPaymentDueDate: z.string(),
+    totalPaymentsMade: z.number(),
+    totalPaymentsRemaining: z.number(),
+    status: z.string(),
+  }).optional(),
 });
 
 export type FlowState = z.infer<typeof flowStateSchema>;
