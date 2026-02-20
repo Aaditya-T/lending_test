@@ -488,11 +488,6 @@ export default function Dashboard() {
                       <p className="text-[10px] text-muted-foreground">Due: {state.loanStats.nextPaymentDueDate}</p>
                     </div>
                     <div className="space-y-1">
-                      <p className="text-[10px] text-muted-foreground uppercase font-bold">Payments</p>
-                      <p className="text-lg font-mono font-bold">{state.loanStats.totalPaymentsMade} / {state.loanStats.totalPayments || (state.loanStats.totalPaymentsMade + state.loanStats.totalPaymentsRemaining)}</p>
-                      <p className="text-[10px] text-muted-foreground">{state.loanStats.totalPaymentsRemaining} remaining</p>
-                    </div>
-                    <div className="space-y-1">
                       <p className="text-[10px] text-muted-foreground uppercase font-bold">Status</p>
                       <Badge 
                         variant={state.loanStats.status === "Active" ? "secondary" : "destructive"}
