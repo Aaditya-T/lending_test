@@ -49,6 +49,39 @@ function emitParty(emit: EmitFn, party: Partial<Party> & { role: string }) {
   emit({ type: "party_update", data: party });
 }
 
+async function submitAndWaitSafe(client: xrpl.Client, txBlob: string): Promise<any> {
+  const submitResponse = await client.submit(txBlob);
+  const prelimResult = (submitResponse.result as any)?.engine_result;
+  const prelimMessage = (submitResponse.result as any)?.engine_result_message;
+
+  if (prelimResult && prelimResult !== "tesSUCCESS") {
+    const prefix = prelimResult.substring(0, 3);
+    if (prefix === "tem" || prefix === "tef" || prefix === "ter") {
+      throw new Error(`${prelimResult}: ${prelimMessage || "Transaction rejected by server"}`);
+    }
+  }
+
+  const txHash = (submitResponse.result as any)?.tx_json?.hash;
+  if (!txHash) {
+    throw new Error(`No transaction hash returned. Preliminary: ${prelimResult} — ${prelimMessage}`);
+  }
+
+  const startTime = Date.now();
+  const timeout = 30000;
+  while (Date.now() - startTime < timeout) {
+    await new Promise((r) => setTimeout(r, 2000));
+    try {
+      const txResponse = await client.request({ command: "tx", transaction: txHash, binary: false } as any);
+      const validated = (txResponse.result as any)?.validated;
+      if (validated) {
+        return txResponse;
+      }
+    } catch {}
+  }
+
+  throw new Error(`Transaction ${txHash} not validated within ${timeout / 1000}s (Preliminary: ${prelimResult || "unknown"})`);
+}
+
 async function fundWallet(client: xrpl.Client): Promise<WalletInfo> {
   const fundResult = await client.fundWallet();
   const wallet = fundResult.wallet;
@@ -105,7 +138,7 @@ async function step_issuerSetup(ctx: FlowContext, emit: EmitFn): Promise<void> {
 
     const prepared = await ctx.client.autofill(accountSetTx);
     const signed = ctx.issuer.wallet.sign(prepared);
-    const result = await ctx.client.submitAndWait(signed.tx_blob);
+    const result = await submitAndWaitSafe(ctx.client, signed.tx_blob);
     const txResult = (result.result.meta as any)?.TransactionResult || "unknown";
 
     addReport(ctx,
@@ -135,7 +168,7 @@ async function step_lenderTrustline(ctx: FlowContext, emit: EmitFn): Promise<voi
 
     const prepared = await ctx.client.autofill(trustSetTx);
     const signed = ctx.lender.wallet.sign(prepared);
-    const result = await ctx.client.submitAndWait(signed.tx_blob);
+    const result = await submitAndWaitSafe(ctx.client, signed.tx_blob);
     const txResult = (result.result.meta as any)?.TransactionResult || "unknown";
 
     addReport(ctx,
@@ -166,7 +199,7 @@ async function step_issuerSendsUSDLender(ctx: FlowContext, emit: EmitFn): Promis
 
     const prepared = await ctx.client.autofill(paymentTx);
     const signed = ctx.issuer.wallet.sign(prepared);
-    const result = await ctx.client.submitAndWait(signed.tx_blob);
+    const result = await submitAndWaitSafe(ctx.client, signed.tx_blob);
     const txResult = (result.result.meta as any)?.TransactionResult || "unknown";
 
     emitParty(emit, { role: "lender", usdBalance: "10,000 USD" });
@@ -198,7 +231,7 @@ async function step_brokerTrustline(ctx: FlowContext, emit: EmitFn): Promise<voi
 
     const prepared = await ctx.client.autofill(trustSetTx);
     const signed = ctx.broker.wallet.sign(prepared);
-    const result = await ctx.client.submitAndWait(signed.tx_blob);
+    const result = await submitAndWaitSafe(ctx.client, signed.tx_blob);
     const txResult = (result.result.meta as any)?.TransactionResult || "unknown";
 
     addReport(ctx,
@@ -229,7 +262,7 @@ async function step_issuerSendsUSDBroker(ctx: FlowContext, emit: EmitFn): Promis
 
     const prepared = await ctx.client.autofill(paymentTx);
     const signed = ctx.issuer.wallet.sign(prepared);
-    const result = await ctx.client.submitAndWait(signed.tx_blob);
+    const result = await submitAndWaitSafe(ctx.client, signed.tx_blob);
     const txResult = (result.result.meta as any)?.TransactionResult || "unknown";
 
     emitParty(emit, { role: "broker", usdBalance: "1,000 USD" });
@@ -263,7 +296,7 @@ async function step_createVault(ctx: FlowContext, emit: EmitFn): Promise<void> {
 
     const prepared = await ctx.client.autofill(vaultCreateTx as any);
     const signed = ctx.broker.wallet.sign(prepared);
-    const result = await ctx.client.submitAndWait(signed.tx_blob);
+    const result = await submitAndWaitSafe(ctx.client, signed.tx_blob);
     const txResult = (result.result.meta as any)?.TransactionResult || "unknown";
 
     let vaultId = "";
@@ -305,7 +338,7 @@ async function step_createLoanBroker(ctx: FlowContext, emit: EmitFn): Promise<vo
 
     const prepared = await ctx.client.autofill(loanBrokerSetTx as any);
     const signed = ctx.broker.wallet.sign(prepared);
-    const result = await ctx.client.submitAndWait(signed.tx_blob);
+    const result = await submitAndWaitSafe(ctx.client, signed.tx_blob);
     const txResult = (result.result.meta as any)?.TransactionResult || "unknown";
 
     let loanBrokerId = "";
@@ -348,7 +381,7 @@ async function step_lenderDeposits(ctx: FlowContext, emit: EmitFn): Promise<void
 
     const prepared = await ctx.client.autofill(vaultDepositTx as any);
     const signed = ctx.lender.wallet.sign(prepared);
-    const result = await ctx.client.submitAndWait(signed.tx_blob);
+    const result = await submitAndWaitSafe(ctx.client, signed.tx_blob);
     const txResult = (result.result.meta as any)?.TransactionResult || "unknown";
 
     emitParty(emit, { role: "lender", usdBalance: "5,000 USD (5,000 in Vault)" });
@@ -380,7 +413,7 @@ async function step_borrowerTrustline(ctx: FlowContext, emit: EmitFn): Promise<v
 
     const prepared = await ctx.client.autofill(trustSetTx);
     const signed = ctx.borrower.wallet.sign(prepared);
-    const result = await ctx.client.submitAndWait(signed.tx_blob);
+    const result = await submitAndWaitSafe(ctx.client, signed.tx_blob);
     const txResult = (result.result.meta as any)?.TransactionResult || "unknown";
 
     addReport(ctx,
@@ -411,7 +444,7 @@ async function step_brokerCoverDeposit(ctx: FlowContext, emit: EmitFn): Promise<
 
     const prepared = await ctx.client.autofill(coverDepositTx as any);
     const signed = ctx.broker.wallet.sign(prepared);
-    const result = await ctx.client.submitAndWait(signed.tx_blob);
+    const result = await submitAndWaitSafe(ctx.client, signed.tx_blob);
     const txResult = (result.result.meta as any)?.TransactionResult || "unknown";
 
     addReport(ctx,
@@ -475,7 +508,7 @@ async function step_loanSet(ctx: FlowContext, emit: EmitFn): Promise<void> {
     );
     addReport(ctx, `Counterparty signed TX hash: ${counterpartySigned.hash}`, "");
 
-    const result = await ctx.client.submitAndWait(counterpartySigned.tx_blob);
+    const result = await submitAndWaitSafe(ctx.client, counterpartySigned.tx_blob);
     const txResult = (result.result.meta as any)?.TransactionResult || "unknown";
     const txHash = result.result.hash;
 
@@ -526,7 +559,7 @@ async function step_signerListSet(ctx: FlowContext, emit: EmitFn): Promise<void>
 
     const prepared = await ctx.client.autofill(signerListTx as any);
     const signed = ctx.broker.wallet.sign(prepared);
-    const result = await ctx.client.submitAndWait(signed.tx_blob);
+    const result = await submitAndWaitSafe(ctx.client, signed.tx_blob);
     const txResult = (result.result.meta as any)?.TransactionResult || "unknown";
 
     addReport(ctx,
@@ -624,7 +657,7 @@ async function step_loanSetMultiSig(ctx: FlowContext, emit: EmitFn): Promise<voi
     const finalBlob = (xrpl as any).encode(decodedMultisig);
     addReport(ctx, "CounterpartySignature manually computed and added by Borrower", "");
 
-    const result = await ctx.client.submitAndWait(finalBlob);
+    const result = await submitAndWaitSafe(ctx.client, finalBlob);
     const txResult = (result.result.meta as any)?.TransactionResult || "unknown";
     const txHash = result.result.hash;
 
@@ -680,7 +713,7 @@ async function step_fundBorrowerForRepayment(ctx: FlowContext, emit: EmitFn): Pr
 
     const prepared = await ctx.client.autofill(paymentTx);
     const signed = ctx.issuer.wallet.sign(prepared);
-    const result = await ctx.client.submitAndWait(signed.tx_blob);
+    const result = await submitAndWaitSafe(ctx.client, signed.tx_blob);
     const txResult = (result.result.meta as any)?.TransactionResult || "unknown";
 
     addReport(ctx,
@@ -736,7 +769,7 @@ async function step_loanPay(ctx: FlowContext, emit: EmitFn, opts?: { earlyFull?:
 
     const prepared = await ctx.client.autofill(loanPayTx as any);
     const signed = ctx.borrower.wallet.sign(prepared);
-    const result = await ctx.client.submitAndWait(signed.tx_blob);
+    const result = await submitAndWaitSafe(ctx.client, signed.tx_blob);
     const txResult = (result.result.meta as any)?.TransactionResult || "unknown";
 
     addReport(ctx,
@@ -767,7 +800,7 @@ async function step_loanManageDefault(ctx: FlowContext, emit: EmitFn): Promise<v
 
     const prepared = await ctx.client.autofill(loanManageTx as any);
     const signed = ctx.broker.wallet.sign(prepared);
-    const result = await ctx.client.submitAndWait(signed.tx_blob);
+    const result = await submitAndWaitSafe(ctx.client, signed.tx_blob);
     const txResult = (result.result.meta as any)?.TransactionResult || "unknown";
 
     addReport(ctx,
@@ -798,7 +831,7 @@ async function step_loanDelete(ctx: FlowContext, emit: EmitFn): Promise<void> {
 
     const prepared = await ctx.client.autofill(loanDeleteTx as any);
     const signed = ctx.broker.wallet.sign(prepared);
-    const result = await ctx.client.submitAndWait(signed.tx_blob);
+    const result = await submitAndWaitSafe(ctx.client, signed.tx_blob);
     const txResult = (result.result.meta as any)?.TransactionResult || "unknown";
 
     addReport(ctx,
@@ -840,7 +873,7 @@ async function step_brokerCoverWithdraw(ctx: FlowContext, emit: EmitFn): Promise
 
     const prepared = await ctx.client.autofill(coverWithdrawTx as any);
     const signed = ctx.broker.wallet.sign(prepared);
-    const result = await ctx.client.submitAndWait(signed.tx_blob);
+    const result = await submitAndWaitSafe(ctx.client, signed.tx_blob);
     const txResult = (result.result.meta as any)?.TransactionResult || "unknown";
 
     addReport(ctx,
@@ -870,7 +903,7 @@ async function step_loanBrokerDelete(ctx: FlowContext, emit: EmitFn): Promise<vo
 
     const prepared = await ctx.client.autofill(loanBrokerDeleteTx as any);
     const signed = ctx.broker.wallet.sign(prepared);
-    const result = await ctx.client.submitAndWait(signed.tx_blob);
+    const result = await submitAndWaitSafe(ctx.client, signed.tx_blob);
     const txResult = (result.result.meta as any)?.TransactionResult || "unknown";
 
     addReport(ctx,
@@ -912,7 +945,7 @@ async function step_vaultWithdraw(ctx: FlowContext, emit: EmitFn): Promise<void>
 
     const prepared = await ctx.client.autofill(vaultWithdrawTx as any);
     const signed = ctx.lender.wallet.sign(prepared);
-    const result = await ctx.client.submitAndWait(signed.tx_blob);
+    const result = await submitAndWaitSafe(ctx.client, signed.tx_blob);
     const txResult = (result.result.meta as any)?.TransactionResult || "unknown";
 
     addReport(ctx,
@@ -942,7 +975,7 @@ async function step_vaultDelete(ctx: FlowContext, emit: EmitFn): Promise<void> {
 
     const prepared = await ctx.client.autofill(vaultDeleteTx as any);
     const signed = ctx.broker.wallet.sign(prepared);
-    const result = await ctx.client.submitAndWait(signed.tx_blob);
+    const result = await submitAndWaitSafe(ctx.client, signed.tx_blob);
     const txResult = (result.result.meta as any)?.TransactionResult || "unknown";
 
     addReport(ctx,
@@ -1126,7 +1159,7 @@ async function submitBatch(ctx: FlowContext, config: BatchConfig): Promise<{ has
     signedBlob = outerSigned.tx_blob;
   }
 
-  const result = await ctx.client.submitAndWait(signedBlob);
+  const result = await submitAndWaitSafe(ctx.client, signedBlob);
   const txResult = (result.result.meta as any)?.TransactionResult || "unknown";
   return { hash: result.result.hash, result: txResult, response: result };
 }
@@ -1225,6 +1258,9 @@ async function runSharedSetup(ctx: FlowContext, emit: EmitFn): Promise<void> {
   } else {
     // SEQUENTIAL MODE: Individual transactions with parallel where possible
 
+    // Phase 2: Enable DefaultRipple on Issuer (MUST happen before trustlines/payments)
+    await step_issuerSetup(ctx, emit);
+
     // Phase 3: All 3 trustlines in parallel
     await Promise.all([
       step_lenderTrustline(ctx, emit),
@@ -1263,6 +1299,13 @@ function getScenarioStepCount(scenarioId: ScenarioId, useBatch?: boolean): numbe
   }
 }
 
+function extractAmount(field: any): string {
+  if (!field) return "0";
+  if (typeof field === "string") return field;
+  if (typeof field === "object" && field.value) return field.value;
+  return String(field);
+}
+
 async function updateLoanStats(ctx: FlowContext, emit: EmitFn) {
   if (!ctx.loanId) return;
   try {
@@ -1272,14 +1315,24 @@ async function updateLoanStats(ctx: FlowContext, emit: EmitFn) {
     } as any);
     const loan = (response.result as any).node || (response.result as any).ledger_entry;
     if (loan) {
+      const principal = parseFloat(extractAmount(loan.PrincipalAmount || loan.PrincipalRequested));
+      const principalPaid = parseFloat(extractAmount(loan.PrincipalPaid));
+      const interestPaid = parseFloat(extractAmount(loan.InterestPaid));
+      const paymentAmount = extractAmount(loan.PaymentAmount);
+      const RIPPLE_EPOCH = 946684800;
+      const nextDueRaw = loan.NextPaymentDueDate;
+      const nextDueDate = nextDueRaw
+        ? new Date((nextDueRaw + RIPPLE_EPOCH) * 1000).toLocaleString()
+        : "N/A";
+
       const stats = {
-        principalPaid: loan.PrincipalPaid || "0",
-        principalRemaining: (BigInt(loan.PrincipalAmount) - BigInt(loan.PrincipalPaid || "0")).toString(),
-        interestPaid: loan.InterestPaid || "0",
-        nextPaymentAmount: loan.PaymentAmount,
-        nextPaymentDueDate: loan.NextPaymentDueDate ? new Date(loan.NextPaymentDueDate * 1000).toLocaleString() : "N/A",
-        totalPaymentsMade: loan.PaymentsMade || 0,
-        totalPaymentsRemaining: loan.PaymentsRemaining || 0,
+        principalPaid: principalPaid.toFixed(2),
+        principalRemaining: Math.max(0, principal - principalPaid).toFixed(2),
+        interestPaid: interestPaid.toFixed(2),
+        nextPaymentAmount: paymentAmount,
+        nextPaymentDueDate: nextDueDate,
+        totalPaymentsMade: loan.PaymentsMade ?? loan.PaymentsCompleted ?? 0,
+        totalPaymentsRemaining: loan.PaymentsRemaining ?? (loan.PaymentTotal ? loan.PaymentTotal - (loan.PaymentsMade ?? 0) : 0),
         status: loan.Flags & 0x00010000 ? "Defaulted" : "Active",
       };
       emit({ type: "state_update", data: { loanStats: stats } });
