@@ -30,12 +30,11 @@ The app supports 6 scenarios, all sharing a common setup phase (11 steps):
 
 ## Shared Setup Steps (all scenarios) — Two Modes
 ### Batch Mode (XLS-56 ON) — 6 steps
-Uses multi-account BatchSigners for maximum transaction compression:
+Uses mega-batch for maximum transaction compression:
 - **Step 1**: Fund 4 wallets via faucet (parallel faucet calls)
-- **Step 2**: Issuer enables DefaultRipple
-- **Step 3**: Batch 3 TrustSets (Lender+Broker+Borrower — 3-account BatchSigners)
-- **Step 4**: Batch 2 Payments + VaultCreate (Issuer+Broker — 2-account BatchSigners)
-- **Step 5**: Batch LoanBrokerSet + VaultDeposit (Broker+Lender — 2-account BatchSigners)
+- **Step 2**: Mega-Batch: AccountSet + 3 TrustSets + 2 Payments (6 inner txns, 4-account BatchSigners, ALLORNOTHING)
+- **Step 3**: VaultCreate (sequential — XLS-65 types not supported as inner batch on current devnet)
+- **Step 4-5**: LoanBrokerSet + VaultDeposit (parallel, sequential)
 - **Step 6**: Broker deposits first-loss capital (LoanBrokerCoverDeposit)
 
 ### Sequential Mode (XLS-56 OFF) — 11 steps
@@ -49,10 +48,14 @@ Individual transactions with parallel execution where possible:
 
 ### Multi-Account Batch Implementation
 - Uses xrpl.js built-in `signMultiBatch()` and `combineBatchSigners()` for multi-account Batch signing
-- Each inner transaction gets Fee="0", SigningPubKey="", tfInnerBatchTxn flag (0x00000004)
+- Inner txns built with minimal fields + tfInnerBatchTxn flag (0x40000000); autofillBatchTxn handles Sequence/Fee/SigningPubKey/NetworkID
+- Forbidden fields explicitly stripped: LastLedgerSequence, TxnSignature, Signers, DeliverMax
 - Outer account signs normally, other accounts sign via `signMultiBatch(wallet, prepared, { batchAccount })`
-- VaultID and LoanBrokerID extracted post-batch via `account_objects` query (not predictable pre-submission)
-- Fallback to sequential execution if any batch fails
+- VaultID and LoanBrokerID extracted post-submission via `account_objects` query (not predictable pre-submission)
+- Fee: autofill computes baseFee*2 + sum(innerFees); code adds batchSignerCount*baseFee for multi-account
+- LastLedgerSequence: +20 buffer after autofill, or current_ledger+30 as fallback
+- XLS-65/66 transaction types (VaultCreate, VaultDeposit, LoanBrokerSet) kept sequential due to devnet inner batch restrictions
+- Fallback to sequential execution if mega-batch fails
 
 ## Transaction Types Implemented
 - AccountSet, TrustSet, Payment, SignerListSet (standard XRPL)
