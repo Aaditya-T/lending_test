@@ -509,7 +509,7 @@ async function step_loanSet(ctx: FlowContext, emit: EmitFn): Promise<void> {
 
 async function step_signerListSet(ctx: FlowContext, emit: EmitFn): Promise<void> {
   const stepId = "signerlist-set";
-  emitStep(emit, { id: stepId, title: "Set Up SignerList on Broker", description: "Broker configures SignerListSet adding Borrower as authorized signer (quorum=1) for multi-sig LoanSet", status: "running", transactionType: "SignerListSet" });
+  emitStep(emit, { id: stepId, title: "Set Up SignerList on Broker", description: "Broker configures SignerListSet adding Lender as delegate signer (quorum=1) for multi-sig authorization", status: "running", transactionType: "SignerListSet" });
 
   try {
     const signerListTx: Record<string, any> = {
@@ -517,7 +517,7 @@ async function step_signerListSet(ctx: FlowContext, emit: EmitFn): Promise<void>
       Account: ctx.broker.address,
       SignerQuorum: 1,
       SignerEntries: [
-        { SignerEntry: { Account: ctx.borrower.address, SignerWeight: 1 } },
+        { SignerEntry: { Account: ctx.lender.address, SignerWeight: 1 } },
       ],
     };
 
@@ -531,14 +531,16 @@ async function step_signerListSet(ctx: FlowContext, emit: EmitFn): Promise<void>
       `TX Hash:  ${signed.hash}`, `Result:   ${txResult}`,
       `Account:  ${ctx.broker.address}`,
       `Quorum:   1`,
-      `Signer:   ${ctx.borrower.address} (weight: 1)`, "",
-      "This configures the broker account so that LoanSet transactions",
-      "can be authorized via standard XRPL multi-signature (Signers array).",
-      "Note: XRPL does not allow an account to be in its own SignerList.",
-      "The borrower is added as a signer who can authorize broker transactions.", ""
+      `Delegate: ${ctx.lender.address} (Lender, weight: 1)`, "",
+      "This configures the broker account so that transactions can be",
+      "authorized via standard XRPL multi-signature (Signers array).",
+      "The Lender is added as a delegate signer for the broker.",
+      "Note: XRPL prohibits accounts from being in their own SignerList.", "",
+      "For LoanSet, the broker's Account authorization comes via the Lender's",
+      "multi-sig, while the Borrower provides CounterpartySignature separately.", ""
     );
 
-    emitStep(emit, { id: stepId, title: "Set Up SignerList on Broker", description: `SignerList configured: ${txResult}`, status: txResult === "tesSUCCESS" ? "success" : "error", transactionHash: signed.hash, transactionType: "SignerListSet", details: { "Result": txResult, "Quorum": "1", "Signer": `${ctx.borrower.address} (weight: 1)`, "Purpose": "Enable borrower to authorize broker's LoanSet via multi-sig", "Note": "XRPL prohibits accounts from being in their own SignerList" }, error: txResult !== "tesSUCCESS" ? `SignerListSet failed: ${txResult}` : undefined });
+    emitStep(emit, { id: stepId, title: "Set Up SignerList on Broker", description: `SignerList configured: ${txResult}`, status: txResult === "tesSUCCESS" ? "success" : "error", transactionHash: signed.hash, transactionType: "SignerListSet", details: { "Result": txResult, "Quorum": "1", "Delegate Signer": `${ctx.lender.address} (Lender, weight: 1)`, "Purpose": "Enable Lender to authorize broker transactions via multi-sig", "Note": "Broker cannot be in its own SignerList; Lender acts as delegate" }, error: txResult !== "tesSUCCESS" ? `SignerListSet failed: ${txResult}` : undefined });
 
     if (txResult !== "tesSUCCESS") throw new Error(`SignerListSet failed: ${txResult}`);
   } catch (err: any) {
@@ -549,11 +551,15 @@ async function step_signerListSet(ctx: FlowContext, emit: EmitFn): Promise<void>
 
 async function step_loanSetMultiSig(ctx: FlowContext, emit: EmitFn): Promise<void> {
   const stepId = "loan-set-multisig";
-  emitStep(emit, { id: stepId, title: "Create Loan with Multi-Sig (SignerList)", description: "LoanSet authorized by Borrower via Signers array (standard XRPL multi-sig on broker account)", status: "running", transactionType: "LoanSet" });
+  emitStep(emit, { id: stepId, title: "Create Loan with Multi-Sig + CounterpartySignature", description: "Lender signs via multi-sig (as broker delegate) + Borrower provides CounterpartySignature", status: "running", transactionType: "LoanSet" });
 
   try {
     addReport(ctx,
-      "=".repeat(70), "CREATE LOAN WITH MULTI-SIG SIGNERLIST (XLS-66 LoanSet)", "=".repeat(70), ""
+      "=".repeat(70), "CREATE LOAN WITH SIGNERLIST MULTI-SIG + COUNTERPARTYSIGNATURE", "=".repeat(70), "",
+      "This demonstrates combining TWO XRPL authorization mechanisms:",
+      "1. SignerList multi-sig: Lender signs on behalf of Broker (Account)",
+      "2. CounterpartySignature: Borrower co-signs as Counterparty", "",
+      "The Broker delegated signing authority to the Lender via SignerListSet.", ""
     );
 
     try {
@@ -593,13 +599,18 @@ async function step_loanSetMultiSig(ctx: FlowContext, emit: EmitFn): Promise<voi
       `Fee adjusted to ${prepared.Fee} drops (${signerCount + 1}x base fee for ${signerCount} signer)`, ""
     );
 
-    const borrowerSigned = ctx.borrower.wallet.sign(prepared, true);
-    addReport(ctx, `Borrower multi-sig signature added (signing on behalf of broker account)`, "");
+    addReport(ctx, "Step 1: Lender signs via multi-sig (as broker's delegate from SignerList)...", "");
+    const lenderSigned = ctx.lender.wallet.sign(prepared, true);
+    addReport(ctx, `Lender multi-sig signature added (delegate signer for broker account)`, "");
 
-    const combinedBlob = (xrpl as any).multisign([borrowerSigned.tx_blob]);
+    const combinedBlob = (xrpl as any).multisign([lenderSigned.tx_blob]);
     addReport(ctx, "Multi-sig transaction assembled with xrpl.multisign()", "");
 
-    const result = await ctx.client.submitAndWait(combinedBlob);
+    addReport(ctx, "Step 2: Borrower adds CounterpartySignature (dual authorization)...", "");
+    const finalBlob = (xrpl as any).signLoanSetByCounterparty(ctx.borrower.wallet, combinedBlob);
+    addReport(ctx, "CounterpartySignature added by Borrower", "");
+
+    const result = await ctx.client.submitAndWait(finalBlob);
     const txResult = (result.result.meta as any)?.TransactionResult || "unknown";
     const txHash = result.result.hash;
 
@@ -616,21 +627,26 @@ async function step_loanSetMultiSig(ctx: FlowContext, emit: EmitFn): Promise<voi
 
     addReport(ctx,
       `TX Hash:  ${txHash}`, `Result:   ${txResult}`, `Loan ID:  ${loanId || "N/A"}`, "",
-      "Co-signing method: Standard XRPL multi-sig via SignerList",
-      "Borrower (listed in broker's SignerList) authorized the LoanSet",
-      "via Signers array - an alternative to CounterpartySignature", ""
+      "Authorization summary:",
+      `  Account (Broker): ${ctx.broker.address}`,
+      `    -> Delegated to Lender via SignerList multi-sig`,
+      `  Counterparty (Borrower): ${ctx.borrower.address}`,
+      `    -> Authorized via CounterpartySignature`, "",
+      "This shows both XRPL authorization mechanisms working together:", 
+      "  - Standard multi-sig (Signers array) for Account authorization",
+      "  - CounterpartySignature (XLS-66) for Counterparty authorization", ""
     );
 
     if (txResult === "tesSUCCESS") {
       emitParty(emit, { role: "borrower", usdBalance: "1,000 USD (loan)" });
     }
 
-    emitStep(emit, { id: stepId, title: "Create Loan with Multi-Sig (SignerList)", description: loanId ? `Loan created: ${loanId.slice(0, 12)}... | Multi-sig authorized` : `LoanSet submitted: ${txResult}`, status: txResult === "tesSUCCESS" ? "success" : "error", transactionHash: txHash, transactionType: "LoanSet", details: { "Result": txResult, "Loan ID": loanId || "N/A", "Principal Requested": "1,000 USD", "Interest Rate": "5% (500 basis points)", "Payment Interval": "3600s (1 hour)", "Payment Total": "12 payments", "Co-Sign Method": "SignerList Multi-Sig (Signers array)", "Authorized Signer": ctx.borrower.address, "Account": ctx.broker.address, "Note": "Borrower signs on behalf of broker via SignerList" }, error: txResult !== "tesSUCCESS" ? `LoanSet failed: ${txResult}` : undefined });
+    emitStep(emit, { id: stepId, title: "Create Loan with Multi-Sig + CounterpartySignature", description: loanId ? `Loan created: ${loanId.slice(0, 12)}... | Dual-mechanism auth` : `LoanSet submitted: ${txResult}`, status: txResult === "tesSUCCESS" ? "success" : "error", transactionHash: txHash, transactionType: "LoanSet", details: { "Result": txResult, "Loan ID": loanId || "N/A", "Principal Requested": "1,000 USD", "Interest Rate": "5% (500 basis points)", "Payment Interval": "3600s (1 hour)", "Payment Total": "12 payments", "Account Auth": "Multi-sig (Lender as broker delegate)", "Counterparty Auth": "CounterpartySignature (Borrower)", "Delegate Signer": ctx.lender.address, "Note": "Combines SignerList multi-sig + CounterpartySignature" }, error: txResult !== "tesSUCCESS" ? `LoanSet failed: ${txResult}` : undefined });
 
     if (txResult !== "tesSUCCESS") throw new Error(`LoanSet multi-sig failed: ${txResult}`);
   } catch (err: any) {
     addReport(ctx, `ERROR: ${err.message}`, "");
-    emitStep(emit, { id: stepId, title: "Create Loan with Multi-Sig (SignerList)", description: "Failed - see error details", status: "error", transactionType: "LoanSet", error: err.message });
+    emitStep(emit, { id: stepId, title: "Create Loan with Multi-Sig + CounterpartySignature", description: "Failed - see error details", status: "error", transactionType: "LoanSet", error: err.message });
     throw err;
   }
 }

@@ -54,11 +54,14 @@ The app supports 6 scenarios, all sharing a common setup phase (11 steps):
 - Final transaction contains CounterpartySignature field
 
 ### 2. SignerList Multi-Sig (Standard XRPL)
-- Broker sets up SignerListSet with Borrower as signer (quorum=1)
+- Broker sets up SignerListSet with Lender as delegate signer (quorum=1)
 - Note: XRPL prohibits accounts from being in their own SignerList
+- Note: Counterparty (Borrower) cannot also be a multi-sig signer (temBAD_SIGNER)
 - LoanSet is built with `SigningPubKey: ""` for multi-sig
-- Borrower signs with `wallet.sign(tx, true)` (multi-sign mode)
-- Signature assembled via `xrpl.multisign([borrowerBlob])`
+- Lender signs with `wallet.sign(tx, true)` (multi-sign mode, as broker delegate)
+- Signature assembled via `xrpl.multisign([lenderBlob])`
+- Borrower then adds CounterpartySignature via `xrpl.signLoanSetByCounterparty()`
+- Combines BOTH authorization mechanisms: multi-sig (Account) + CounterpartySignature (Counterparty)
 - Fee adjusted to `(signers + 1) * baseFee` per XRPL multi-sig rules
 
 ## First-Loss Capital (Cover)

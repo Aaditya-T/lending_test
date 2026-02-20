@@ -104,11 +104,11 @@ export const SCENARIOS: ScenarioConfig[] = [
   {
     id: "signerlist-loan",
     name: "SignerList Loan",
-    description: "Create a loan using standard XRPL multi-sig (SignerListSet + Signers array) instead of CounterpartySignature co-signing",
+    description: "Create a loan combining SignerList multi-sig (Lender as broker delegate) with CounterpartySignature (Borrower) - two XRPL auth mechanisms in one transaction",
     diagramSteps: [
       { label: "Setup", actor: "All" },
       { label: "SignerListSet", actor: "Broker" },
-      { label: "Multi-Sig Loan", actor: "Borrower" },
+      { label: "Multi-Sig + CounterpartySig Loan", actor: "Lender+Borrower" },
       { label: "Verify", actor: "System" },
     ],
   },
