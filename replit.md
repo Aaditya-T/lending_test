@@ -59,7 +59,8 @@ Wall-clock time reduced from 11 sequential transactions to ~6 parallel phases.
 - LoanSet is built with `SigningPubKey: ""` for multi-sig
 - Lender signs with `wallet.sign(tx, true)` (multi-sign mode, as broker delegate)
 - Signature assembled via `xrpl.multisign([lenderBlob])`
-- Borrower then adds CounterpartySignature via `xrpl.signLoanSetByCounterparty()`
+- CounterpartySignature manually computed (can't use `signLoanSetByCounterparty` since it requires TxnSignature which multi-sig doesn't have)
+  - Decode multisigned blob → `encodeForSigning()` → `keypairSign()` → add CounterpartySignature → re-encode
 - Combines BOTH authorization mechanisms: multi-sig (Account) + CounterpartySignature (Counterparty)
 - Fee adjusted to `(signers + 1) * baseFee` per XRPL multi-sig rules
 
@@ -77,6 +78,7 @@ Wall-clock time reduced from 11 sequential transactions to ~6 parallel phases.
 - Scenario selector with visual flow diagrams
 - Real-time step tracking with progress bar
 - Detailed report with copy functionality
+- Batch/Normal transaction toggle (XLS-56 Batch ON/OFF)
 
 ## Network
 - Devnet: wss://s.devnet.rippletest.net:51233

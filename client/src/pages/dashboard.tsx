@@ -240,6 +240,7 @@ export default function Dashboard() {
   const [rawReport, setRawReport] = useState<string>("");
   const [showReport, setShowReport] = useState(false);
   const [selectedScenario, setSelectedScenario] = useState<ScenarioId>("loan-creation");
+  const [useBatch, setUseBatch] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleExport = useCallback(() => {
@@ -326,10 +327,10 @@ export default function Dashboard() {
       }
     };
 
-    runLendingFlow(emit, selectedScenario).catch((err) => {
+    runLendingFlow(emit, selectedScenario, { useBatch }).catch((err) => {
       setState((prev) => ({ ...prev, status: "error", errorMessage: err.message }));
     });
-  }, [selectedScenario]);
+  }, [selectedScenario, useBatch]);
 
   const totalSteps = state.steps.length || 13;
   const completedSteps = state.steps.filter((s) => s.status === "success").length;
@@ -439,6 +440,19 @@ export default function Dashboard() {
                   </>
                 )}
               </Button>
+              <button
+                onClick={() => setUseBatch(!useBatch)}
+                disabled={state.status === "running"}
+                role="switch"
+                aria-checked={useBatch}
+                className="flex items-center gap-2 px-3 py-1.5 rounded-md border text-xs font-medium transition-colors disabled:opacity-50 cursor-pointer"
+                data-testid="toggle-batch-mode"
+              >
+                <span className={`inline-block w-8 h-[18px] rounded-full relative transition-colors ${useBatch ? "bg-primary" : "bg-muted"}`}>
+                  <span className={`absolute top-[3px] w-3 h-3 rounded-full bg-white transition-all duration-200 ${useBatch ? "left-[17px]" : "left-[3px]"}`} />
+                </span>
+                <span>Batch Txns {useBatch ? "ON" : "OFF"}</span>
+              </button>
               <p className="text-xs text-muted-foreground">{currentScenario.description}</p>
             </div>
             <FlowDiagram scenarioId={selectedScenario} />

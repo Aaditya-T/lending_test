@@ -4,6 +4,7 @@ if (typeof globalThis.Buffer === "undefined") {
 }
 
 import * as xrpl from "xrpl";
+import { sign as keypairSign } from "ripple-keypairs";
 import type { FlowStep, Party, ScenarioId } from "./types";
 
 type EmitFn = (event: { type: string; data: any }) => void;
@@ -24,6 +25,7 @@ interface FlowContext {
   loanBrokerId?: string;
   loanId?: string;
   report: string[];
+  useBatch?: boolean;
 }
 
 function toHex(str: string): string {
@@ -607,8 +609,19 @@ async function step_loanSetMultiSig(ctx: FlowContext, emit: EmitFn): Promise<voi
     addReport(ctx, "Multi-sig transaction assembled with xrpl.multisign()", "");
 
     addReport(ctx, "Step 2: Borrower adds CounterpartySignature (dual authorization)...", "");
-    const finalBlob = (xrpl as any).signLoanSetByCounterparty(ctx.borrower.wallet, combinedBlob);
-    addReport(ctx, "CounterpartySignature added by Borrower", "");
+
+    const decodedMultisig = (xrpl as any).decode(combinedBlob);
+
+    const signingData = (xrpl as any).encodeForSigning(decodedMultisig);
+    const counterpartySig = keypairSign(signingData, ctx.borrower.wallet.privateKey);
+
+    decodedMultisig.CounterpartySignature = {
+      SigningPubKey: ctx.borrower.wallet.publicKey,
+      TxnSignature: counterpartySig,
+    };
+
+    const finalBlob = (xrpl as any).encode(decodedMultisig);
+    addReport(ctx, "CounterpartySignature manually computed and added by Borrower", "");
 
     const result = await ctx.client.submitAndWait(finalBlob);
     const txResult = (result.result.meta as any)?.TransactionResult || "unknown";
@@ -1017,24 +1030,18 @@ async function step_batchIssuerPayments(ctx: FlowContext, emit: EmitFn): Promise
   emitStep(emit, { id: stepId, title: "Batch: Issuer USD Payments", description: "Sending USD to Lender (10,000) and Broker (1,000) in a single Batch transaction (XLS-56)", status: "running", transactionType: "Batch (2× Payment)" });
 
   try {
-    const payLender: Record<string, any> = {
+    const innerPayLender: Record<string, any> = {
       TransactionType: "Payment",
       Account: ctx.issuer.address,
       Destination: ctx.lender.address,
       Amount: { currency: "USD", issuer: ctx.issuer.address, value: "10000" },
-      Fee: "0",
-      SigningPubKey: "",
-      Flags: 1073741824,
     };
 
-    const payBroker: Record<string, any> = {
+    const innerPayBroker: Record<string, any> = {
       TransactionType: "Payment",
       Account: ctx.issuer.address,
       Destination: ctx.broker.address,
       Amount: { currency: "USD", issuer: ctx.issuer.address, value: "1000" },
-      Fee: "0",
-      SigningPubKey: "",
-      Flags: 1073741824,
     };
 
     const batchTx: Record<string, any> = {
@@ -1042,13 +1049,21 @@ async function step_batchIssuerPayments(ctx: FlowContext, emit: EmitFn): Promise
       Account: ctx.issuer.address,
       Flags: 65536,
       RawTransactions: [
-        { RawTransaction: payLender },
-        { RawTransaction: payBroker },
+        { RawTransaction: innerPayLender },
+        { RawTransaction: innerPayBroker },
       ],
     };
 
-    await (xrpl as any).autofillBatchTxn(ctx.client, batchTx);
     const prepared = await ctx.client.autofill(batchTx as any);
+
+    for (const rt of (prepared as any).RawTransactions) {
+      const inner = rt.RawTransaction;
+      inner.Flags = (inner.Flags || 0) | 0x40000000;
+      inner.Fee = "0";
+      inner.SigningPubKey = "";
+      delete inner.TxnSignature;
+    }
+
     const signed = ctx.issuer.wallet.sign(prepared);
     const result = await ctx.client.submitAndWait(signed.tx_blob);
     const txResult = (result.result.meta as any)?.TransactionResult || "unknown";
@@ -1088,20 +1103,20 @@ async function runSharedSetup(ctx: FlowContext, emit: EmitFn): Promise<void> {
     step_borrowerTrustline(ctx, emit),
   ]);
 
-  // Phase 4: Batch both Issuer payments (XLS-56 ALLORNOTHING) + VaultCreate in parallel
-  // Batch sends USD to Lender AND Broker in one atomic tx (same account, auto-sequenced)
+  // Phase 4: Issuer payments + VaultCreate in parallel
   // VaultCreate runs alongside on a different account (Broker)
-  // If Batch is unavailable, falls back to sequential individual payments
   const vaultPromise = step_createVault(ctx, emit);
-  let paymentsDone = false;
-  try {
-    await step_batchIssuerPayments(ctx, emit);
-    paymentsDone = true;
-  } catch (batchErr: any) {
-    addReport(ctx, `Batch payments unavailable (${batchErr.message}), using sequential fallback...`, "");
+  if (ctx.useBatch) {
+    try {
+      await step_batchIssuerPayments(ctx, emit);
+    } catch (batchErr: any) {
+      addReport(ctx, `Batch payments failed (${batchErr.message}), using sequential fallback...`, "");
+      await step_issuerSendsUSDLender(ctx, emit);
+      await step_issuerSendsUSDBroker(ctx, emit);
+    }
+  } else {
     await step_issuerSendsUSDLender(ctx, emit);
     await step_issuerSendsUSDBroker(ctx, emit);
-    paymentsDone = true;
   }
   await vaultPromise;
 
@@ -1128,7 +1143,7 @@ function getScenarioStepCount(scenarioId: ScenarioId): number {
   }
 }
 
-export async function runLendingFlow(emit: EmitFn, scenarioId: ScenarioId = "loan-creation"): Promise<string> {
+export async function runLendingFlow(emit: EmitFn, scenarioId: ScenarioId = "loan-creation", options?: { useBatch?: boolean }): Promise<string> {
   const ctx: FlowContext = {
     client: null as any,
     issuer: null as any,
@@ -1136,13 +1151,14 @@ export async function runLendingFlow(emit: EmitFn, scenarioId: ScenarioId = "loa
     borrower: null as any,
     broker: null as any,
     report: [],
+    useBatch: options?.useBatch ?? false,
   };
 
   const network = "wss://s.devnet.rippletest.net:51233";
 
   addReport(ctx,
     "=".repeat(70), `XRPL LENDING PROTOCOL - ${scenarioId.toUpperCase()} SCENARIO`, "=".repeat(70),
-    `Network:  ${network}`, `Scenario: ${scenarioId}`, `Started:  ${new Date().toISOString()}`, ""
+    `Network:  ${network}`, `Scenario: ${scenarioId}`, `Batch:    ${ctx.useBatch ? "Enabled (XLS-56)" : "Disabled (sequential)"}`, `Started:  ${new Date().toISOString()}`, ""
   );
 
   emit({ type: "state_update", data: { scenarioId, totalSteps: getScenarioStepCount(scenarioId) } });
