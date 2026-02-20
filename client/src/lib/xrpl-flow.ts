@@ -1034,22 +1034,26 @@ interface BatchConfig {
 async function submitBatch(ctx: FlowContext, config: BatchConfig): Promise<{ hash: string; result: string; response: any }> {
   const { outerSigner, innerTxns, mode = 65536 } = config;
 
-  const batchTx: Record<string, any> = {
-    TransactionType: "Batch",
-    Account: outerSigner.address,
-    Flags: mode,
-    RawTransactions: innerTxns.map(({ tx }) => ({ RawTransaction: { ...tx } })),
-  };
-
-  const prepared = await ctx.client.autofill(batchTx as any);
-
-  for (const rt of (prepared as any).RawTransactions) {
-    const inner = rt.RawTransaction;
+  const preparedInner: Record<string, any>[] = [];
+  for (const { tx } of innerTxns) {
+    const filled = await ctx.client.autofill(tx as any);
+    const inner = filled as Record<string, any>;
     inner.Flags = (inner.Flags || 0) | 0x40000000;
     inner.Fee = "0";
     inner.SigningPubKey = "";
     delete inner.TxnSignature;
+    delete inner.LastLedgerSequence;
+    preparedInner.push(inner);
   }
+
+  const batchTx: Record<string, any> = {
+    TransactionType: "Batch",
+    Account: outerSigner.address,
+    Flags: mode,
+    RawTransactions: preparedInner.map((tx) => ({ RawTransaction: { ...tx } })),
+  };
+
+  const prepared = await ctx.client.autofill(batchTx as any);
 
   const otherAccounts = new Map<string, WalletInfo>();
   for (const { account } of innerTxns) {
@@ -1065,17 +1069,23 @@ async function submitBatch(ctx: FlowContext, config: BatchConfig): Promise<{ has
     return { hash: result.result.hash, result: txResult, response: result };
   }
 
-  const batchSignerBlobs: string[] = [];
+  const signedCopies: string[] = [];
   otherAccounts.forEach((walletInfo, addr) => {
-    const signed = (xrpl as any).signMultiBatch(walletInfo.wallet, prepared, { batchAccount: addr });
-    batchSignerBlobs.push(signed.tx_blob);
+    const txCopy = JSON.parse(JSON.stringify(prepared));
+    (xrpl as any).signMultiBatch(walletInfo.wallet, txCopy, { batchAccount: addr });
+    signedCopies.push((xrpl as any).encode(txCopy));
   });
 
-  const outerSigned = outerSigner.wallet.sign(prepared);
-  batchSignerBlobs.push(outerSigned.tx_blob);
+  let combinedTx: any;
+  if (signedCopies.length === 1) {
+    combinedTx = (xrpl as any).decode(signedCopies[0]);
+  } else {
+    const combinedBlob = (xrpl as any).combineBatchSigners(signedCopies);
+    combinedTx = (xrpl as any).decode(combinedBlob);
+  }
 
-  const combinedBlob = (xrpl as any).combineBatchSigners(batchSignerBlobs);
-  const result = await ctx.client.submitAndWait(combinedBlob);
+  const outerSigned = outerSigner.wallet.sign(combinedTx);
+  const result = await ctx.client.submitAndWait(outerSigned.tx_blob);
   const txResult = (result.result.meta as any)?.TransactionResult || "unknown";
   return { hash: result.result.hash, result: txResult, response: result };
 }
