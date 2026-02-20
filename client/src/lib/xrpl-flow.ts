@@ -1067,10 +1067,10 @@ async function submitBatch(ctx: FlowContext, config: BatchConfig): Promise<{ has
 
   // Give generous LastLedgerSequence window (signing + combining takes time)
   if ((prepared as any).LastLedgerSequence) {
-    (prepared as any).LastLedgerSequence += 20;
+    (prepared as any).LastLedgerSequence += 100;
   } else {
     const currentLedger = await ctx.client.getLedgerIndex();
-    (prepared as any).LastLedgerSequence = currentLedger + 30;
+    (prepared as any).LastLedgerSequence = currentLedger + 120;
   }
 
   // Debug: log full prepared batch for diagnosing temINVALID_INNER_BATCH
