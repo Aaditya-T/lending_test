@@ -28,21 +28,20 @@ The app supports 6 scenarios, all sharing a common setup phase (11 steps):
 5. **Full Lifecycle** - Setup + LoanSet + LoanPay + LoanManage + LoanDelete + CoverWithdraw + BrokerDelete + VaultWithdraw + VaultDelete
 6. **SignerList Loan** - Setup + SignerListSet (multi-sig config) + LoanSet (via Signers array multi-sig) + verify
 
-## Shared Setup Steps (all scenarios)
-1. Fund 4 wallets via faucet
-2. Issuer enables DefaultRipple
-3. Lender creates USD trustline
-4. Issuer sends USD to Lender (10,000 USD)
-5. Broker creates USD trustline
-6. Issuer sends USD to Broker (1,000 USD for first-loss capital)
-7. Broker creates Vault (VaultCreate)
-8. Broker creates LoanBroker (LoanBrokerSet)
-9. Lender deposits USD in Vault (VaultDeposit - 5,000 USD)
-10. Borrower creates USD trustline
-11. Broker deposits first-loss capital (LoanBrokerCoverDeposit - 500 USD)
+## Shared Setup Steps (all scenarios) — Parallelized
+Setup uses 6 phases with parallel execution and XLS-56 Batch transactions:
+- **Phase 1**: Fund 4 wallets via faucet (parallel faucet calls)
+- **Phase 2**: Issuer enables DefaultRipple
+- **Phase 3** (parallel): Lender TrustSet || Broker TrustSet || Borrower TrustSet
+- **Phase 4** (parallel): Batch Issuer Payments (XLS-56: 10,000 USD→Lender + 1,000 USD→Broker in one atomic tx) || VaultCreate
+- **Phase 5** (parallel): LoanBrokerSet || VaultDeposit (5,000 USD)
+- **Phase 6**: Broker deposits first-loss capital (LoanBrokerCoverDeposit - 500 USD)
+
+Wall-clock time reduced from 11 sequential transactions to ~6 parallel phases.
 
 ## Transaction Types Implemented
 - AccountSet, TrustSet, Payment, SignerListSet (standard XRPL)
+- Batch (XLS-56 — single-account Batch for Issuer payments, ALLORNOTHING mode)
 - VaultCreate, VaultDeposit, VaultWithdraw, VaultDelete (XLS-65)
 - LoanBrokerSet, LoanBrokerCoverDeposit, LoanBrokerCoverWithdraw, LoanBrokerDelete (XLS-66)
 - LoanSet (with CounterpartySignature OR multi-sig Signers), LoanPay, LoanManage, LoanDelete (XLS-66)

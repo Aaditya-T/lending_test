@@ -103,7 +103,7 @@ function PartyCard({ party }: { party: Party }) {
   );
 }
 
-function StepItem({ step, index }: { step: FlowStep; index: number }) {
+function StepItem({ step, index, isParallel }: { step: FlowStep; index: number; isParallel?: boolean }) {
   const [expanded, setExpanded] = useState(false);
 
   const statusIcon = {
@@ -144,6 +144,9 @@ function StepItem({ step, index }: { step: FlowStep; index: number }) {
           <p className="text-xs text-muted-foreground truncate">{step.description}</p>
         </div>
         <div className="flex items-center gap-2 flex-shrink-0 flex-wrap">
+          {isParallel && (
+            <Badge variant="outline" className="text-xs font-mono border-blue-300 dark:border-blue-700 text-blue-600 dark:text-blue-400" data-testid={`badge-parallel-${step.id}`}>Parallel</Badge>
+          )}
           {step.transactionType && (
             <Badge variant="outline" className="text-xs font-mono">{step.transactionType}</Badge>
           )}
@@ -478,9 +481,11 @@ export default function Dashboard() {
               </CardHeader>
               <CardContent>
                 <div className="max-h-[600px] overflow-y-auto space-y-2 pr-1">
-                  {state.steps.map((step, i) => (
-                    <StepItem key={step.id} step={step} index={i} />
-                  ))}
+                  {state.steps.map((step, i) => {
+                    const runningCount = state.steps.filter((s) => s.status === "running").length;
+                    const isParallel = step.status === "running" && runningCount > 1;
+                    return <StepItem key={step.id} step={step} index={i} isParallel={isParallel} />;
+                  })}
                 </div>
                 {state.errorMessage && (
                   <div className="mt-3 p-3 bg-destructive/10 border border-destructive/20 rounded-md">
