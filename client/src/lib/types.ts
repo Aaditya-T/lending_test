@@ -136,6 +136,7 @@ export const flowStateSchema = z.object({
     nextPaymentDueDate: z.string(),
     totalPaymentsMade: z.number(),
     totalPaymentsRemaining: z.number(),
+    totalPayments: z.number(),
     status: z.string(),
   }).optional(),
 });

@@ -786,6 +786,7 @@ async function step_loanPay(ctx: FlowContext, emit: EmitFn, opts?: { earlyFull?:
     emitStep(emit, { id: stepId, title, description: `${payAmount} USD payment ${txResult === "tesSUCCESS" ? "succeeded" : "failed"}`, status: txResult === "tesSUCCESS" ? "success" : "error", transactionHash: signed.hash, transactionType: "LoanPay", details: { "Result": txResult, "Amount": `${payAmount} USD`, "Loan ID": ctx.loanId, "Type": isEarly ? "Early Full Repayment" : "Scheduled Payment" }, error: txResult !== "tesSUCCESS" ? `LoanPay failed: ${txResult}` : undefined });
 
     if (txResult !== "tesSUCCESS") throw new Error(`LoanPay failed: ${txResult}`);
+    await updateLoanStats(ctx, emit);
   } catch (err: any) {
     emitStep(emit, { id: stepId, title, description: "Failed", status: "error", error: err.message });
     throw err;
@@ -1398,10 +1399,11 @@ async function updateLoanStats(ctx: FlowContext, emit: EmitFn) {
           : "0.00"),
         principalRemaining: principalOutstanding.toFixed(2),
         interestPaid: interestOwed.toFixed(2),
-        nextPaymentAmount: periodicPayment,
+        nextPaymentAmount: parseFloat(periodicPayment).toFixed(2),
         nextPaymentDueDate: nextDueDate,
-        totalPaymentsMade: loan.PaymentTotal ? (loan.PaymentTotal - (loan.PaymentRemaining ?? 0)) : 0,
-        totalPaymentsRemaining: loan.PaymentRemaining ?? 0,
+        totalPaymentsMade: (loan.PaymentTotal != null && loan.PaymentRemaining != null) ? (loan.PaymentTotal - loan.PaymentRemaining) : 0,
+        totalPaymentsRemaining: loan.PaymentRemaining ?? loan.PaymentTotal ?? 0,
+        totalPayments: loan.PaymentTotal ?? 0,
         status: loanStatus,
       };
       emit({ type: "state_update", data: { loanStats: stats } });
