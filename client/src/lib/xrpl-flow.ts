@@ -262,11 +262,8 @@ async function step_createVault(ctx: FlowContext, emit: EmitFn): Promise<void> {
     };
 
     const prepared = await ctx.client.autofill(vaultCreateTx);
-    console.log("VaultCreate prepared:", prepared);
     const signed = ctx.broker.wallet.sign(prepared);
-    console.log("VaultCreate signed hash:", signed.hash);
     const result = await ctx.client.submitAndWait(signed.tx_blob);
-    console.log("VaultCreate result:", result);
     const txResult = (result.result.meta as any)?.TransactionResult || "unknown";
 
     let vaultId = "";
