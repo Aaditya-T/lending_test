@@ -493,7 +493,6 @@ async function step_loanSet(ctx: FlowContext, emit: EmitFn): Promise<void> {
       InterestRate: 500,
       PaymentInterval: 3600,
       PaymentTotal: 12,
-      GracePeriod: 10,
     };
 
     const prepared = await ctx.client.autofill(loanSetTx as any);
@@ -622,7 +621,6 @@ async function step_loanSetMultiSig(ctx: FlowContext, emit: EmitFn): Promise<voi
       InterestRate: 500,
       PaymentInterval: 3600,
       PaymentTotal: 12,
-      GracePeriod: 10,
       SigningPubKey: "",
     };
 
