@@ -439,14 +439,14 @@ async function step_loanSet(ctx: FlowContext, emit: EmitFn): Promise<void> {
 
     try {
       const vaultObj = await ctx.client.request({ command: "ledger_entry", index: ctx.vaultId } as any);
-      addReport(ctx, "Pre-flight Vault State:", JSON.stringify(vaultObj.result?.node || vaultObj.result, null, 2), "");
+      addReport(ctx, "Pre-flight Vault State:", JSON.stringify((vaultObj.result as any)?.node || vaultObj.result, null, 2), "");
     } catch (e: any) {
       addReport(ctx, `Vault query failed: ${e.message}`, "");
     }
 
     try {
       const loanBrokerObj = await ctx.client.request({ command: "ledger_entry", index: ctx.loanBrokerId } as any);
-      addReport(ctx, "Pre-flight LoanBroker State:", JSON.stringify(loanBrokerObj.result?.node || loanBrokerObj.result, null, 2), "");
+      addReport(ctx, "Pre-flight LoanBroker State:", JSON.stringify((loanBrokerObj.result as any)?.node || loanBrokerObj.result, null, 2), "");
     } catch (e: any) {
       addReport(ctx, `LoanBroker query failed: ${e.message}`, "");
     }
@@ -566,14 +566,14 @@ async function step_loanSetMultiSig(ctx: FlowContext, emit: EmitFn): Promise<voi
 
     try {
       const vaultObj = await ctx.client.request({ command: "ledger_entry", index: ctx.vaultId } as any);
-      addReport(ctx, "Pre-flight Vault State:", JSON.stringify(vaultObj.result?.node || vaultObj.result, null, 2), "");
+      addReport(ctx, "Pre-flight Vault State:", JSON.stringify((vaultObj.result as any)?.node || vaultObj.result, null, 2), "");
     } catch (e: any) {
       addReport(ctx, `Vault query failed: ${e.message}`, "");
     }
 
     try {
       const loanBrokerObj = await ctx.client.request({ command: "ledger_entry", index: ctx.loanBrokerId } as any);
-      addReport(ctx, "Pre-flight LoanBroker State:", JSON.stringify(loanBrokerObj.result?.node || loanBrokerObj.result, null, 2), "");
+      addReport(ctx, "Pre-flight LoanBroker State:", JSON.stringify((loanBrokerObj.result as any)?.node || loanBrokerObj.result, null, 2), "");
     } catch (e: any) {
       addReport(ctx, `LoanBroker query failed: ${e.message}`, "");
     }
@@ -711,7 +711,7 @@ async function step_loanPay(ctx: FlowContext, emit: EmitFn, opts?: { earlyFull?:
     if (isEarly) {
       try {
         const loanObj = await ctx.client.request({ command: "ledger_entry", index: ctx.loanId } as any);
-        const loanNode = loanObj.result?.node as any;
+        const loanNode = (loanObj.result as any)?.node as any;
         if (loanNode?.OutstandingPrincipal) {
           const outstanding = typeof loanNode.OutstandingPrincipal === "object"
             ? loanNode.OutstandingPrincipal.value
@@ -821,7 +821,7 @@ async function step_brokerCoverWithdraw(ctx: FlowContext, emit: EmitFn): Promise
     let withdrawAmount = "500";
     try {
       const lbObj = await ctx.client.request({ command: "ledger_entry", index: ctx.loanBrokerId } as any);
-      const lbNode = lbObj.result?.node as any;
+      const lbNode = (lbObj.result as any)?.node as any;
       if (lbNode?.CoverAvailable) {
         const cover = typeof lbNode.CoverAvailable === "object" ? lbNode.CoverAvailable.value : lbNode.CoverAvailable;
         withdrawAmount = cover;
@@ -893,7 +893,7 @@ async function step_vaultWithdraw(ctx: FlowContext, emit: EmitFn): Promise<void>
     let withdrawAmount = "5000";
     try {
       const vaultObj = await ctx.client.request({ command: "ledger_entry", index: ctx.vaultId } as any);
-      const vaultNode = vaultObj.result?.node as any;
+      const vaultNode = (vaultObj.result as any)?.node as any;
       if (vaultNode?.AssetsAvailable) {
         const avail = typeof vaultNode.AssetsAvailable === "object" ? vaultNode.AssetsAvailable.value : vaultNode.AssetsAvailable;
         withdrawAmount = avail;
@@ -1025,121 +1025,268 @@ async function step_verifyStates(ctx: FlowContext, emit: EmitFn): Promise<void> 
   }
 }
 
-async function step_batchIssuerPayments(ctx: FlowContext, emit: EmitFn): Promise<void> {
-  const stepId = "batch-issuer-payments";
-  emitStep(emit, { id: stepId, title: "Batch: Issuer USD Payments", description: "Sending USD to Lender (10,000) and Broker (1,000) in a single Batch transaction (XLS-56)", status: "running", transactionType: "Batch (2× Payment)" });
+interface BatchConfig {
+  outerSigner: WalletInfo;
+  innerTxns: { account: WalletInfo; tx: Record<string, any> }[];
+  mode?: number;
+}
 
-  try {
-    const innerPayLender: Record<string, any> = {
-      TransactionType: "Payment",
-      Account: ctx.issuer.address,
-      Destination: ctx.lender.address,
-      Amount: { currency: "USD", issuer: ctx.issuer.address, value: "10000" },
-    };
+async function submitBatch(ctx: FlowContext, config: BatchConfig): Promise<{ hash: string; result: string; response: any }> {
+  const { outerSigner, innerTxns, mode = 65536 } = config;
 
-    const innerPayBroker: Record<string, any> = {
-      TransactionType: "Payment",
-      Account: ctx.issuer.address,
-      Destination: ctx.broker.address,
-      Amount: { currency: "USD", issuer: ctx.issuer.address, value: "1000" },
-    };
+  const batchTx: Record<string, any> = {
+    TransactionType: "Batch",
+    Account: outerSigner.address,
+    Flags: mode,
+    RawTransactions: innerTxns.map(({ tx }) => ({ RawTransaction: { ...tx } })),
+  };
 
-    const batchTx: Record<string, any> = {
-      TransactionType: "Batch",
-      Account: ctx.issuer.address,
-      Flags: 65536,
-      RawTransactions: [
-        { RawTransaction: innerPayLender },
-        { RawTransaction: innerPayBroker },
-      ],
-    };
+  const prepared = await ctx.client.autofill(batchTx as any);
 
-    const prepared = await ctx.client.autofill(batchTx as any);
+  for (const rt of (prepared as any).RawTransactions) {
+    const inner = rt.RawTransaction;
+    inner.Flags = (inner.Flags || 0) | 0x40000000;
+    inner.Fee = "0";
+    inner.SigningPubKey = "";
+    delete inner.TxnSignature;
+  }
 
-    for (const rt of (prepared as any).RawTransactions) {
-      const inner = rt.RawTransaction;
-      inner.Flags = (inner.Flags || 0) | 0x40000000;
-      inner.Fee = "0";
-      inner.SigningPubKey = "";
-      delete inner.TxnSignature;
+  const otherAccounts = new Map<string, WalletInfo>();
+  for (const { account } of innerTxns) {
+    if (account.address !== outerSigner.address && !otherAccounts.has(account.address)) {
+      otherAccounts.set(account.address, account);
     }
+  }
 
-    const signed = ctx.issuer.wallet.sign(prepared);
+  if (otherAccounts.size === 0) {
+    const signed = outerSigner.wallet.sign(prepared);
     const result = await ctx.client.submitAndWait(signed.tx_blob);
     const txResult = (result.result.meta as any)?.TransactionResult || "unknown";
+    return { hash: result.result.hash, result: txResult, response: result };
+  }
+
+  const batchSignerBlobs: string[] = [];
+  otherAccounts.forEach((walletInfo, addr) => {
+    const signed = (xrpl as any).signMultiBatch(walletInfo.wallet, prepared, { batchAccount: addr });
+    batchSignerBlobs.push(signed.tx_blob);
+  });
+
+  const outerSigned = outerSigner.wallet.sign(prepared);
+  batchSignerBlobs.push(outerSigned.tx_blob);
+
+  const combinedBlob = (xrpl as any).combineBatchSigners(batchSignerBlobs);
+  const result = await ctx.client.submitAndWait(combinedBlob);
+  const txResult = (result.result.meta as any)?.TransactionResult || "unknown";
+  return { hash: result.result.hash, result: txResult, response: result };
+}
+
+async function findCreatedObject(ctx: FlowContext, account: string, entryType: string): Promise<string> {
+  try {
+    const objects = await ctx.client.request({
+      command: "account_objects",
+      account,
+      ledger_index: "validated",
+    } as any);
+    const found = (objects.result as any).account_objects?.find((obj: any) => obj.LedgerEntryType === entryType);
+    return found?.index || "";
+  } catch {
+    return "";
+  }
+}
+
+async function step_batchTrustSets(ctx: FlowContext, emit: EmitFn): Promise<void> {
+  const stepId = "batch-trustsets";
+  emitStep(emit, { id: stepId, title: "Batch: 3 TrustSets", description: "All 3 trustlines in a single multi-account Batch (XLS-56 BatchSigners)", status: "running", transactionType: "Batch (3× TrustSet)" });
+
+  try {
+    const batchResult = await submitBatch(ctx, {
+      outerSigner: ctx.lender,
+      innerTxns: [
+        { account: ctx.lender, tx: { TransactionType: "TrustSet", Account: ctx.lender.address, LimitAmount: { currency: "USD", issuer: ctx.issuer.address, value: "100000" } } },
+        { account: ctx.broker, tx: { TransactionType: "TrustSet", Account: ctx.broker.address, LimitAmount: { currency: "USD", issuer: ctx.issuer.address, value: "100000" } } },
+        { account: ctx.borrower, tx: { TransactionType: "TrustSet", Account: ctx.borrower.address, LimitAmount: { currency: "USD", issuer: ctx.issuer.address, value: "100000" } } },
+      ],
+    });
+
+    addReport(ctx,
+      "=".repeat(70), "BATCH TRUSTSETS (XLS-56 — 3× TrustSet, multi-account)", "=".repeat(70),
+      `TX Hash:  ${batchResult.hash}`, `Result:   ${batchResult.result}`,
+      `Mode:     ALLORNOTHING`,
+      `Inner 1:  Lender TrustSet USD (limit 100,000)`,
+      `Inner 2:  Broker TrustSet USD (limit 100,000)`,
+      `Inner 3:  Borrower TrustSet USD (limit 100,000)`,
+      `Accounts: 3 (Lender=outer signer, Broker+Borrower=BatchSigners)`, ""
+    );
+
+    emitStep(emit, { id: stepId, title: "Batch: 3 TrustSets", description: `All 3 trustlines created atomically: ${batchResult.result}`, status: batchResult.result === "tesSUCCESS" ? "success" : "error", transactionHash: batchResult.hash, transactionType: "Batch (3× TrustSet)", details: { "Result": batchResult.result, "Mode": "ALLORNOTHING", "Inner 1": "Lender TrustSet USD", "Inner 2": "Broker TrustSet USD", "Inner 3": "Borrower TrustSet USD", "XLS-56": "Multi-account Batch with BatchSigners" }, error: batchResult.result !== "tesSUCCESS" ? `Batch TrustSets failed: ${batchResult.result}` : undefined });
+
+    if (batchResult.result !== "tesSUCCESS") throw new Error(`Batch TrustSets failed: ${batchResult.result}`);
+  } catch (err: any) {
+    emitStep(emit, { id: stepId, title: "Batch: 3 TrustSets", description: `Batch failed: ${err.message}`, status: "error", transactionType: "Batch (3× TrustSet)", error: err.message });
+    throw err;
+  }
+}
+
+async function step_batchPhase4(ctx: FlowContext, emit: EmitFn): Promise<void> {
+  const stepId = "batch-phase4";
+  emitStep(emit, { id: stepId, title: "Batch: Payments + VaultCreate", description: "2 Issuer Payments + Broker VaultCreate in one multi-account Batch (XLS-56)", status: "running", transactionType: "Batch (2× Payment + VaultCreate)" });
+
+  try {
+    const batchResult = await submitBatch(ctx, {
+      outerSigner: ctx.issuer,
+      innerTxns: [
+        { account: ctx.issuer, tx: { TransactionType: "Payment", Account: ctx.issuer.address, Destination: ctx.lender.address, Amount: { currency: "USD", issuer: ctx.issuer.address, value: "10000" } } },
+        { account: ctx.issuer, tx: { TransactionType: "Payment", Account: ctx.issuer.address, Destination: ctx.broker.address, Amount: { currency: "USD", issuer: ctx.issuer.address, value: "1000" } } },
+        { account: ctx.broker, tx: { TransactionType: "VaultCreate", Account: ctx.broker.address, Asset: { currency: "USD", issuer: ctx.issuer.address }, AssetsMaximum: "100000", Data: toHex("USD Lending Vault") } },
+      ],
+    });
 
     emitParty(emit, { role: "lender", usdBalance: "10,000 USD" });
     emitParty(emit, { role: "broker", usdBalance: "1,000 USD" });
 
+    const vaultId = await findCreatedObject(ctx, ctx.broker.address, "Vault");
+    ctx.vaultId = vaultId;
+    emit({ type: "state_update", data: { vaultId } });
+
     addReport(ctx,
-      "=".repeat(70), "BATCH ISSUER PAYMENTS (XLS-56 Batch — 2× Payment)", "=".repeat(70),
-      `TX Hash:  ${result.result.hash}`, `Result:   ${txResult}`,
+      "=".repeat(70), "BATCH PHASE 4 (XLS-56 — 2× Payment + VaultCreate, multi-account)", "=".repeat(70),
+      `TX Hash:  ${batchResult.hash}`, `Result:   ${batchResult.result}`,
       `Mode:     ALLORNOTHING`,
       `Inner 1:  Payment 10,000 USD → Lender`,
-      `Inner 2:  Payment 1,000 USD → Broker (for first-loss capital)`,
-      `Benefit:  Single-account Batch — no BatchSigners needed, one signature`, ""
+      `Inner 2:  Payment 1,000 USD → Broker`,
+      `Inner 3:  VaultCreate (Broker, USD, max 100,000)`,
+      `Vault ID: ${vaultId || "N/A"}`,
+      `Accounts: 2 (Issuer=outer signer, Broker=BatchSigner)`, ""
     );
 
-    emitStep(emit, { id: stepId, title: "Batch: Issuer USD Payments", description: `Both payments sent atomically: ${txResult}`, status: txResult === "tesSUCCESS" ? "success" : "error", transactionHash: result.result.hash, transactionType: "Batch (2× Payment)", details: { "Result": txResult, "Mode": "ALLORNOTHING", "Payment 1": "10,000 USD → Lender", "Payment 2": "1,000 USD → Broker", "XLS-56": "Single-account Batch (no BatchSigners needed)" }, error: txResult !== "tesSUCCESS" ? `Batch payments failed: ${txResult}` : undefined });
+    emitStep(emit, { id: stepId, title: "Batch: Payments + VaultCreate", description: `3 txns atomically: ${batchResult.result} | Vault: ${(vaultId || "N/A").slice(0, 12)}...`, status: batchResult.result === "tesSUCCESS" ? "success" : "error", transactionHash: batchResult.hash, transactionType: "Batch (2× Payment + VaultCreate)", details: { "Result": batchResult.result, "Mode": "ALLORNOTHING", "Payment 1": "10,000 USD → Lender", "Payment 2": "1,000 USD → Broker", "VaultCreate": `Vault ID: ${vaultId || "N/A"}`, "XLS-56": "Multi-account Batch with BatchSigners" }, error: batchResult.result !== "tesSUCCESS" ? `Batch Phase 4 failed: ${batchResult.result}` : undefined });
 
-    if (txResult !== "tesSUCCESS") throw new Error(`Batch payments failed: ${txResult}`);
+    if (batchResult.result !== "tesSUCCESS") throw new Error(`Batch Phase 4 failed: ${batchResult.result}`);
   } catch (err: any) {
-    emitStep(emit, { id: stepId, title: "Batch: Issuer USD Payments", description: `Batch failed: ${err.message}`, status: "error", transactionType: "Batch (2× Payment)", error: err.message });
+    emitStep(emit, { id: stepId, title: "Batch: Payments + VaultCreate", description: `Batch failed: ${err.message}`, status: "error", transactionType: "Batch (2× Payment + VaultCreate)", error: err.message });
+    throw err;
+  }
+}
+
+async function step_batchPhase5(ctx: FlowContext, emit: EmitFn): Promise<void> {
+  const stepId = "batch-phase5";
+  emitStep(emit, { id: stepId, title: "Batch: LoanBrokerSet + VaultDeposit", description: "LoanBrokerSet + VaultDeposit in one multi-account Batch (XLS-56)", status: "running", transactionType: "Batch (LoanBrokerSet + VaultDeposit)" });
+
+  try {
+    const batchResult = await submitBatch(ctx, {
+      outerSigner: ctx.broker,
+      innerTxns: [
+        { account: ctx.broker, tx: { TransactionType: "LoanBrokerSet", Account: ctx.broker.address, VaultID: ctx.vaultId } },
+        { account: ctx.lender, tx: { TransactionType: "VaultDeposit", Account: ctx.lender.address, VaultID: ctx.vaultId, Amount: { currency: "USD", issuer: ctx.issuer.address, value: "5000" } } },
+      ],
+    });
+
+    emitParty(emit, { role: "lender", usdBalance: "5,000 USD (5,000 in Vault)" });
+
+    const loanBrokerId = await findCreatedObject(ctx, ctx.broker.address, "LoanBroker");
+    ctx.loanBrokerId = loanBrokerId;
+    emit({ type: "state_update", data: { loanBrokerId } });
+
+    addReport(ctx,
+      "=".repeat(70), "BATCH PHASE 5 (XLS-56 — LoanBrokerSet + VaultDeposit, multi-account)", "=".repeat(70),
+      `TX Hash:       ${batchResult.hash}`, `Result:        ${batchResult.result}`,
+      `Mode:          ALLORNOTHING`,
+      `Inner 1:       LoanBrokerSet (Broker)`,
+      `Inner 2:       VaultDeposit 5,000 USD (Lender)`,
+      `LoanBroker ID: ${loanBrokerId || "N/A"}`,
+      `Accounts:      2 (Broker=outer signer, Lender=BatchSigner)`, ""
+    );
+
+    emitStep(emit, { id: stepId, title: "Batch: LoanBrokerSet + VaultDeposit", description: `2 txns atomically: ${batchResult.result} | LoanBroker: ${(loanBrokerId || "N/A").slice(0, 12)}...`, status: batchResult.result === "tesSUCCESS" ? "success" : "error", transactionHash: batchResult.hash, transactionType: "Batch (LoanBrokerSet + VaultDeposit)", details: { "Result": batchResult.result, "Mode": "ALLORNOTHING", "LoanBrokerSet": `LoanBroker ID: ${loanBrokerId || "N/A"}`, "VaultDeposit": "5,000 USD from Lender", "XLS-56": "Multi-account Batch with BatchSigners" }, error: batchResult.result !== "tesSUCCESS" ? `Batch Phase 5 failed: ${batchResult.result}` : undefined });
+
+    if (batchResult.result !== "tesSUCCESS") throw new Error(`Batch Phase 5 failed: ${batchResult.result}`);
+  } catch (err: any) {
+    emitStep(emit, { id: stepId, title: "Batch: LoanBrokerSet + VaultDeposit", description: `Batch failed: ${err.message}`, status: "error", transactionType: "Batch (LoanBrokerSet + VaultDeposit)", error: err.message });
     throw err;
   }
 }
 
 async function runSharedSetup(ctx: FlowContext, emit: EmitFn): Promise<void> {
-  // Phase 1: Fund all 4 wallets (parallel faucet calls internally)
   await step_fundWallets(ctx, emit);
-
-  // Phase 2: Issuer enables DefaultRipple (must complete before trustlines)
   await step_issuerSetup(ctx, emit);
 
-  // Phase 3: All 3 trustlines in parallel (different accounts, no sequence conflicts)
-  await Promise.all([
-    step_lenderTrustline(ctx, emit),
-    step_brokerTrustline(ctx, emit),
-    step_borrowerTrustline(ctx, emit),
-  ]);
-
-  // Phase 4: Issuer payments + VaultCreate in parallel
-  // VaultCreate runs alongside on a different account (Broker)
-  const vaultPromise = step_createVault(ctx, emit);
   if (ctx.useBatch) {
+    // BATCH MODE: 3 batch steps + 1 sequential = 4 steps (vs 9 sequential steps)
+
+    // Batch Phase 3: All 3 TrustSets in one multi-account Batch
     try {
-      await step_batchIssuerPayments(ctx, emit);
+      await step_batchTrustSets(ctx, emit);
     } catch (batchErr: any) {
-      addReport(ctx, `Batch payments failed (${batchErr.message}), using sequential fallback...`, "");
+      addReport(ctx, `Batch TrustSets failed (${batchErr.message}), using sequential fallback...`, "");
+      await Promise.all([
+        step_lenderTrustline(ctx, emit),
+        step_brokerTrustline(ctx, emit),
+        step_borrowerTrustline(ctx, emit),
+      ]);
+    }
+
+    // Batch Phase 4: 2 Payments + VaultCreate in one multi-account Batch
+    try {
+      await step_batchPhase4(ctx, emit);
+    } catch (batchErr: any) {
+      addReport(ctx, `Batch Phase 4 failed (${batchErr.message}), using sequential fallback...`, "");
+      const vaultPromise = step_createVault(ctx, emit);
       await step_issuerSendsUSDLender(ctx, emit);
       await step_issuerSendsUSDBroker(ctx, emit);
+      await vaultPromise;
     }
+
+    // Batch Phase 5: LoanBrokerSet + VaultDeposit in one multi-account Batch
+    try {
+      await step_batchPhase5(ctx, emit);
+    } catch (batchErr: any) {
+      addReport(ctx, `Batch Phase 5 failed (${batchErr.message}), using sequential fallback...`, "");
+      await Promise.all([
+        step_createLoanBroker(ctx, emit),
+        step_lenderDeposits(ctx, emit),
+      ]);
+    }
+
+    // Phase 6: CoverDeposit must be separate (needs LoanBrokerID from Phase 5)
+    await step_brokerCoverDeposit(ctx, emit);
   } else {
+    // SEQUENTIAL MODE: Individual transactions with parallel where possible
+
+    // Phase 3: All 3 trustlines in parallel
+    await Promise.all([
+      step_lenderTrustline(ctx, emit),
+      step_brokerTrustline(ctx, emit),
+      step_borrowerTrustline(ctx, emit),
+    ]);
+
+    // Phase 4: Issuer payments + VaultCreate in parallel
+    const vaultPromise = step_createVault(ctx, emit);
     await step_issuerSendsUSDLender(ctx, emit);
     await step_issuerSendsUSDBroker(ctx, emit);
+    await vaultPromise;
+
+    // Phase 5: LoanBrokerSet + VaultDeposit in parallel
+    await Promise.all([
+      step_createLoanBroker(ctx, emit),
+      step_lenderDeposits(ctx, emit),
+    ]);
+
+    // Phase 6: Broker deposits first-loss capital
+    await step_brokerCoverDeposit(ctx, emit);
   }
-  await vaultPromise;
-
-  // Phase 5: LoanBrokerSet + VaultDeposit in parallel (Broker & Lender — different accounts)
-  // Both deps satisfied: vaultId from Phase 4, Lender has USD, Broker has USD
-  await Promise.all([
-    step_createLoanBroker(ctx, emit),
-    step_lenderDeposits(ctx, emit),
-  ]);
-
-  // Phase 6: Broker deposits first-loss capital (depends on LoanBroker existing + Broker having USD)
-  await step_brokerCoverDeposit(ctx, emit);
 }
 
-function getScenarioStepCount(scenarioId: ScenarioId): number {
+function getScenarioStepCount(scenarioId: ScenarioId, useBatch?: boolean): number {
+  // Setup steps: batch=6 (fund+issuer+batchTrust+batchPhase4+batchPhase5+cover), sequential=11
+  const setupSteps = useBatch ? 6 : 11;
   switch (scenarioId) {
-    case "loan-creation": return 12;
-    case "loan-payment": return 13;
-    case "loan-default": return 14;
-    case "early-repayment": return 15;
-    case "full-lifecycle": return 18;
-    case "signerlist-loan": return 13;
-    default: return 12;
+    case "loan-creation": return setupSteps + 2;     // +LoanSet +Verify
+    case "loan-payment": return setupSteps + 3;      // +LoanSet +LoanPay +Verify
+    case "loan-default": return setupSteps + 4;      // +LoanSet +LoanManage +LoanDelete +Verify
+    case "early-repayment": return setupSteps + 5;   // +LoanSet +FundBorrower +LoanPay +LoanDelete +Verify
+    case "full-lifecycle": return setupSteps + 8;    // +LoanSet +LoanPay +LoanManage +LoanDelete +CoverWithdraw +BrokerDelete +VaultWithdraw +VaultDelete
+    case "signerlist-loan": return setupSteps + 3;   // +SignerListSet +LoanSetMultiSig +Verify
+    default: return setupSteps + 2;
   }
 }
 
@@ -1161,7 +1308,7 @@ export async function runLendingFlow(emit: EmitFn, scenarioId: ScenarioId = "loa
     `Network:  ${network}`, `Scenario: ${scenarioId}`, `Batch:    ${ctx.useBatch ? "Enabled (XLS-56)" : "Disabled (sequential)"}`, `Started:  ${new Date().toISOString()}`, ""
   );
 
-  emit({ type: "state_update", data: { scenarioId, totalSteps: getScenarioStepCount(scenarioId) } });
+  emit({ type: "state_update", data: { scenarioId, totalSteps: getScenarioStepCount(scenarioId, ctx.useBatch) } });
 
   try {
     ctx.client = new xrpl.Client(network);

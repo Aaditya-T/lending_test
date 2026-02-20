@@ -28,20 +28,35 @@ The app supports 6 scenarios, all sharing a common setup phase (11 steps):
 5. **Full Lifecycle** - Setup + LoanSet + LoanPay + LoanManage + LoanDelete + CoverWithdraw + BrokerDelete + VaultWithdraw + VaultDelete
 6. **SignerList Loan** - Setup + SignerListSet (multi-sig config) + LoanSet (via Signers array multi-sig) + verify
 
-## Shared Setup Steps (all scenarios) — Parallelized
-Setup uses 6 phases with parallel execution and XLS-56 Batch transactions:
-- **Phase 1**: Fund 4 wallets via faucet (parallel faucet calls)
-- **Phase 2**: Issuer enables DefaultRipple
-- **Phase 3** (parallel): Lender TrustSet || Broker TrustSet || Borrower TrustSet
-- **Phase 4** (parallel): Batch Issuer Payments (XLS-56: 10,000 USD→Lender + 1,000 USD→Broker in one atomic tx) || VaultCreate
-- **Phase 5** (parallel): LoanBrokerSet || VaultDeposit (5,000 USD)
-- **Phase 6**: Broker deposits first-loss capital (LoanBrokerCoverDeposit - 500 USD)
+## Shared Setup Steps (all scenarios) — Two Modes
+### Batch Mode (XLS-56 ON) — 6 steps
+Uses multi-account BatchSigners for maximum transaction compression:
+- **Step 1**: Fund 4 wallets via faucet (parallel faucet calls)
+- **Step 2**: Issuer enables DefaultRipple
+- **Step 3**: Batch 3 TrustSets (Lender+Broker+Borrower — 3-account BatchSigners)
+- **Step 4**: Batch 2 Payments + VaultCreate (Issuer+Broker — 2-account BatchSigners)
+- **Step 5**: Batch LoanBrokerSet + VaultDeposit (Broker+Lender — 2-account BatchSigners)
+- **Step 6**: Broker deposits first-loss capital (LoanBrokerCoverDeposit)
 
-Wall-clock time reduced from 11 sequential transactions to ~6 parallel phases.
+### Sequential Mode (XLS-56 OFF) — 11 steps
+Individual transactions with parallel execution where possible:
+- **Phase 1**: Fund 4 wallets (parallel)
+- **Phase 2**: Issuer DefaultRipple
+- **Phase 3** (parallel): 3 TrustSets
+- **Phase 4** (parallel): 2 Payments + VaultCreate
+- **Phase 5** (parallel): LoanBrokerSet + VaultDeposit
+- **Phase 6**: CoverDeposit
+
+### Multi-Account Batch Implementation
+- Uses xrpl.js built-in `signMultiBatch()` and `combineBatchSigners()` for multi-account Batch signing
+- Each inner transaction gets Fee="0", SigningPubKey="", tfInnerBatchTxn flag (0x00000004)
+- Outer account signs normally, other accounts sign via `signMultiBatch(wallet, prepared, { batchAccount })`
+- VaultID and LoanBrokerID extracted post-batch via `account_objects` query (not predictable pre-submission)
+- Fallback to sequential execution if any batch fails
 
 ## Transaction Types Implemented
 - AccountSet, TrustSet, Payment, SignerListSet (standard XRPL)
-- Batch (XLS-56 — single-account Batch for Issuer payments, ALLORNOTHING mode)
+- Batch (XLS-56 — single-account and multi-account BatchSigners, ALLORNOTHING mode)
 - VaultCreate, VaultDeposit, VaultWithdraw, VaultDelete (XLS-65)
 - LoanBrokerSet, LoanBrokerCoverDeposit, LoanBrokerCoverWithdraw, LoanBrokerDelete (XLS-66)
 - LoanSet (with CounterpartySignature OR multi-sig Signers), LoanPay, LoanManage, LoanDelete (XLS-66)
