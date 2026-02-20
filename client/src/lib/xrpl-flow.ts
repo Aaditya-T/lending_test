@@ -253,7 +253,7 @@ async function step_createVault(ctx: FlowContext, emit: EmitFn): Promise<void> {
   emitStep(emit, { id: stepId, title: "Broker Creates USD Vault", description: "Broker creates a Single Asset Vault (XLS-65) for USD", status: "running", transactionType: "VaultCreate" });
 
   try {
-    const vaultCreateTx: any = {
+    const vaultCreateTx = {
       TransactionType: "VaultCreate",
       Account: ctx.broker.address,
       Asset: { currency: "USD", issuer: ctx.issuer.address },
@@ -261,7 +261,7 @@ async function step_createVault(ctx: FlowContext, emit: EmitFn): Promise<void> {
       Data: toHex("USD Lending Vault"),
     };
 
-    const prepared = await ctx.client.autofill(vaultCreateTx);
+    const prepared = await ctx.client.autofill(vaultCreateTx as any);
     const signed = ctx.broker.wallet.sign(prepared);
     const result = await ctx.client.submitAndWait(signed.tx_blob);
     const txResult = (result.result.meta as any)?.TransactionResult || "unknown";
@@ -297,13 +297,13 @@ async function step_createLoanBroker(ctx: FlowContext, emit: EmitFn): Promise<vo
   emitStep(emit, { id: stepId, title: "Broker Creates LoanBroker", description: "Broker creates the LoanBroker entry (XLS-66 LoanBrokerSet)", status: "running", transactionType: "LoanBrokerSet" });
 
   try {
-    const loanBrokerSetTx: any = {
+    const loanBrokerSetTx = {
       TransactionType: "LoanBrokerSet",
       Account: ctx.broker.address,
       VaultID: ctx.vaultId,
     };
 
-    const prepared = await ctx.client.autofill(loanBrokerSetTx);
+    const prepared = await ctx.client.autofill(loanBrokerSetTx as any);
     const signed = ctx.broker.wallet.sign(prepared);
     const result = await ctx.client.submitAndWait(signed.tx_blob);
     const txResult = (result.result.meta as any)?.TransactionResult || "unknown";
@@ -339,14 +339,14 @@ async function step_lenderDeposits(ctx: FlowContext, emit: EmitFn): Promise<void
   emitStep(emit, { id: stepId, title: "Lender Deposits USD in Vault", description: "Lender deposits 5,000 USD into the Vault (XLS-65 VaultDeposit)", status: "running", transactionType: "VaultDeposit" });
 
   try {
-    const vaultDepositTx: any = {
+    const vaultDepositTx = {
       TransactionType: "VaultDeposit",
       Account: ctx.lender.address,
       VaultID: ctx.vaultId,
       Amount: { currency: "USD", issuer: ctx.issuer.address, value: "5000" },
     };
 
-    const prepared = await ctx.client.autofill(vaultDepositTx);
+    const prepared = await ctx.client.autofill(vaultDepositTx as any);
     const signed = ctx.lender.wallet.sign(prepared);
     const result = await ctx.client.submitAndWait(signed.tx_blob);
     const txResult = (result.result.meta as any)?.TransactionResult || "unknown";
@@ -402,14 +402,14 @@ async function step_brokerCoverDeposit(ctx: FlowContext, emit: EmitFn): Promise<
   emitStep(emit, { id: stepId, title: "Broker Deposits First-Loss Capital", description: "Broker deposits first-loss capital to enable loan issuance (LoanBrokerCoverDeposit)", status: "running", transactionType: "LoanBrokerCoverDeposit" });
 
   try {
-    const coverDepositTx: any = {
+    const coverDepositTx = {
       TransactionType: "LoanBrokerCoverDeposit",
       Account: ctx.broker.address,
       LoanBrokerID: ctx.loanBrokerId,
       Amount: { currency: "USD", issuer: ctx.issuer.address, value: "500" },
     };
 
-    const prepared = await ctx.client.autofill(coverDepositTx);
+    const prepared = await ctx.client.autofill(coverDepositTx as any);
     const signed = ctx.broker.wallet.sign(prepared);
     const result = await ctx.client.submitAndWait(signed.tx_blob);
     const txResult = (result.result.meta as any)?.TransactionResult || "unknown";
@@ -1232,10 +1232,11 @@ async function runSharedSetup(ctx: FlowContext, emit: EmitFn): Promise<void> {
       step_borrowerTrustline(ctx, emit),
     ]);
 
-    // Phase 4: Issuer payments + VaultCreate (Sequential to avoid race conditions/stuck txns)
+    // Phase 4: Issuer payments + VaultCreate in parallel
+    const vaultPromise = step_createVault(ctx, emit);
     await step_issuerSendsUSDLender(ctx, emit);
     await step_issuerSendsUSDBroker(ctx, emit);
-    await step_createVault(ctx, emit);
+    await vaultPromise;
 
     // Phase 5: LoanBrokerSet + VaultDeposit in parallel
     await Promise.all([
