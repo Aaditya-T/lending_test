@@ -496,11 +496,11 @@ export default function Dashboard() {
                       <p className="text-[10px] text-muted-foreground uppercase font-bold">Status</p>
                       <Badge 
                         variant={state.loanStats.status === "Active" ? "secondary" : "destructive"}
-                        className={state.loanStats.status === "Active" ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400" : ""}
+                        className={state.loanStats.status === "Active" ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400" : state.loanStats.status === "Impaired" ? "bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-400" : ""}
                       >
                         {state.loanStats.status}
                       </Badge>
-                      <p className="text-[10px] text-muted-foreground">Interest Paid: {state.loanStats.interestPaid} USD</p>
+                      <p className="text-[10px] text-muted-foreground">Interest Owed: {state.loanStats.interestPaid} USD</p>
                     </div>
                   </div>
                 </CardContent>

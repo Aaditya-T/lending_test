@@ -23,7 +23,7 @@ End-to-end demo of the XRPL Lending Protocol (XLS-66) with Single Asset Vaults (
 The app supports 6 scenarios, all sharing a common setup phase (11 steps):
 1. **Loan Creation** - Setup + LoanSet (CounterpartySignature) + verify (base scenario)
 2. **Loan Payment** - Setup + LoanSet + LoanPay + verify
-3. **Loan Default** - Setup + LoanSet + LoanManage (default) + LoanDelete + verify
+3. **Loan Default** - Setup + LoanSet + LoanManage(impair) + GracePeriodWait + LoanManage(default) + LoanDelete + verify
 4. **Early Repayment** - Setup + LoanSet + LoanPay (full early) + LoanDelete + verify
 5. **Full Lifecycle** - Setup + LoanSet + LoanPay + LoanManage + LoanDelete + CoverWithdraw + BrokerDelete + VaultWithdraw + VaultDelete
 6. **SignerList Loan** - Setup + SignerListSet (multi-sig config) + LoanSet (via Signers array multi-sig) + verify

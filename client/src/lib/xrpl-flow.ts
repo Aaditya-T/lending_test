@@ -493,6 +493,7 @@ async function step_loanSet(ctx: FlowContext, emit: EmitFn): Promise<void> {
       InterestRate: 500,
       PaymentInterval: 3600,
       PaymentTotal: 12,
+      GracePeriod: 10,
     };
 
     const prepared = await ctx.client.autofill(loanSetTx as any);
@@ -621,6 +622,7 @@ async function step_loanSetMultiSig(ctx: FlowContext, emit: EmitFn): Promise<voi
       InterestRate: 500,
       PaymentInterval: 3600,
       PaymentTotal: 12,
+      GracePeriod: 10,
       SigningPubKey: "",
     };
 
@@ -747,12 +749,18 @@ async function step_loanPay(ctx: FlowContext, emit: EmitFn, opts?: { earlyFull?:
       try {
         const loanObj = await ctx.client.request({ command: "ledger_entry", index: ctx.loanId } as any);
         const loanNode = (loanObj.result as any)?.node as any;
-        if (loanNode?.OutstandingPrincipal) {
-          const outstanding = typeof loanNode.OutstandingPrincipal === "object"
-            ? loanNode.OutstandingPrincipal.value
-            : loanNode.OutstandingPrincipal;
-          payAmount = String(Math.ceil(parseFloat(outstanding) * 1.1));
-          addReport(ctx, `Outstanding principal: ${outstanding}`, `Paying: ${payAmount} (includes closing interest)`, "");
+        if (loanNode) {
+          const totalOutstanding = parseFloat(extractAmount(loanNode.TotalValueOutstanding));
+          const serviceFee = parseFloat(extractAmount(loanNode.LoanServiceFee));
+          const closePaymentFee = parseFloat(extractAmount(loanNode.ClosePaymentFee));
+          const totalDue = totalOutstanding + serviceFee + closePaymentFee;
+          payAmount = String(Math.ceil(totalDue * 1.05));
+          addReport(ctx,
+            `TotalValueOutstanding: ${totalOutstanding}`,
+            `LoanServiceFee: ${serviceFee}`,
+            `ClosePaymentFee: ${closePaymentFee}`,
+            `Paying: ${payAmount} (includes fees + 5% buffer for accrued interest)`, ""
+          );
         }
       } catch (e: any) {
         payAmount = "1100";
@@ -787,33 +795,86 @@ async function step_loanPay(ctx: FlowContext, emit: EmitFn, opts?: { earlyFull?:
 }
 
 async function step_loanManageDefault(ctx: FlowContext, emit: EmitFn): Promise<void> {
-  const stepId = "loan-manage-default";
-  emitStep(emit, { id: stepId, title: "Broker Defaults the Loan", description: "Broker marks the loan as defaulted via LoanManage (borrower failed to pay)", status: "running", transactionType: "LoanManage" });
+  const tfLoanImpair = 131072;
+  const tfLoanDefault = 65536;
+
+  const impairStepId = "loan-manage-impair";
+  emitStep(emit, { id: impairStepId, title: "Broker Impairs the Loan", description: "Broker impairs the loan via LoanManage (tfLoanImpair) to start grace period countdown", status: "running", transactionType: "LoanManage" });
 
   try {
-    const loanManageTx = {
+    const impairTx = {
       TransactionType: "LoanManage",
       Account: ctx.broker.address,
       LoanID: ctx.loanId,
-      Flags: 1,
+      Flags: tfLoanImpair,
     };
 
-    const prepared = await ctx.client.autofill(loanManageTx as any);
-    const signed = ctx.broker.wallet.sign(prepared);
-    const result = await submitAndWaitSafe(ctx.client, signed.tx_blob);
-    const txResult = (result.result.meta as any)?.TransactionResult || "unknown";
+    const impairPrepared = await ctx.client.autofill(impairTx as any);
+    const impairSigned = ctx.broker.wallet.sign(impairPrepared);
+    const impairResult = await submitAndWaitSafe(ctx.client, impairSigned.tx_blob);
+    const impairTxResult = (impairResult.result.meta as any)?.TransactionResult || "unknown";
+
+    let gracePeriod = 60;
+    let nextPaymentDueDate = 0;
+    const affectedNodes = (impairResult.result.meta as any)?.AffectedNodes || [];
+    for (const node of affectedNodes) {
+      if (node.ModifiedNode?.LedgerEntryType === "Loan") {
+        gracePeriod = node.ModifiedNode.FinalFields?.GracePeriod ?? 60;
+        nextPaymentDueDate = node.ModifiedNode.FinalFields?.NextPaymentDueDate ?? 0;
+        break;
+      }
+    }
 
     addReport(ctx,
-      "=".repeat(70), "BROKER DEFAULTS THE LOAN (LoanManage)", "=".repeat(70),
-      `TX Hash:  ${signed.hash}`, `Result:   ${txResult}`, `Loan ID:  ${ctx.loanId}`,
+      "=".repeat(70), "BROKER IMPAIRS THE LOAN (LoanManage tfLoanImpair)", "=".repeat(70),
+      `TX Hash:       ${impairSigned.hash}`, `Result:        ${impairTxResult}`, `Loan ID:       ${ctx.loanId}`,
+      `Grace Period:  ${gracePeriod}s`, `Next Due Date: ${nextPaymentDueDate}`,
+      "Loan impaired. Grace period countdown started.", ""
+    );
+
+    emitStep(emit, { id: impairStepId, title: "Broker Impairs the Loan", description: `Impaired: ${impairTxResult} | Grace: ${gracePeriod}s`, status: impairTxResult === "tesSUCCESS" ? "success" : "error", transactionHash: impairSigned.hash, transactionType: "LoanManage", details: { "Result": impairTxResult, "Loan ID": ctx.loanId, "Action": "Impair (tfLoanImpair)", "Grace Period": `${gracePeriod}s` }, error: impairTxResult !== "tesSUCCESS" ? `LoanManage impair failed: ${impairTxResult}` : undefined });
+
+    if (impairTxResult !== "tesSUCCESS") throw new Error(`LoanManage impair failed: ${impairTxResult}`);
+
+    const defaultTime = nextPaymentDueDate + gracePeriod;
+    const RIPPLE_EPOCH = 946684800;
+    const currentRippleTime = Math.floor(Date.now() / 1000) - RIPPLE_EPOCH;
+    const waitSeconds = Math.max(0, defaultTime - currentRippleTime + 5);
+
+    if (waitSeconds > 0) {
+      const waitStepId = "loan-grace-wait";
+      emitStep(emit, { id: waitStepId, title: "Waiting for Grace Period", description: `Waiting ~${waitSeconds}s for grace period to expire before defaulting...`, status: "running", transactionType: "LoanManage" });
+      addReport(ctx, `Waiting ${waitSeconds}s for grace period to expire...`, "");
+      await new Promise(resolve => setTimeout(resolve, waitSeconds * 1000));
+      emitStep(emit, { id: waitStepId, title: "Grace Period Expired", description: "Grace period elapsed. Loan can now be defaulted.", status: "success", transactionType: "LoanManage" });
+    }
+
+    const defaultStepId = "loan-manage-default";
+    emitStep(emit, { id: defaultStepId, title: "Broker Defaults the Loan", description: "Broker marks the loan as defaulted via LoanManage (tfLoanDefault)", status: "running", transactionType: "LoanManage" });
+
+    const defaultTx = {
+      TransactionType: "LoanManage",
+      Account: ctx.broker.address,
+      LoanID: ctx.loanId,
+      Flags: tfLoanDefault,
+    };
+
+    const defaultPrepared = await ctx.client.autofill(defaultTx as any);
+    const defaultSigned = ctx.broker.wallet.sign(defaultPrepared);
+    const defaultResult = await submitAndWaitSafe(ctx.client, defaultSigned.tx_blob);
+    const defaultTxResult = (defaultResult.result.meta as any)?.TransactionResult || "unknown";
+
+    addReport(ctx,
+      "=".repeat(70), "BROKER DEFAULTS THE LOAN (LoanManage tfLoanDefault)", "=".repeat(70),
+      `TX Hash:  ${defaultSigned.hash}`, `Result:   ${defaultTxResult}`, `Loan ID:  ${ctx.loanId}`,
       "The broker marks the loan as defaulted. First-loss capital may be liquidated", "to protect vault depositors from losses.", ""
     );
 
-    emitStep(emit, { id: stepId, title: "Broker Defaults the Loan", description: `Loan defaulted: ${txResult}`, status: txResult === "tesSUCCESS" ? "success" : "error", transactionHash: signed.hash, transactionType: "LoanManage", details: { "Result": txResult, "Loan ID": ctx.loanId, "Action": "Default (Flags: 1)", "Impact": "First-loss capital may be liquidated to cover losses" }, error: txResult !== "tesSUCCESS" ? `LoanManage failed: ${txResult}` : undefined });
+    emitStep(emit, { id: defaultStepId, title: "Broker Defaults the Loan", description: `Loan defaulted: ${defaultTxResult}`, status: defaultTxResult === "tesSUCCESS" ? "success" : "error", transactionHash: defaultSigned.hash, transactionType: "LoanManage", details: { "Result": defaultTxResult, "Loan ID": ctx.loanId, "Action": "Default (tfLoanDefault = 0x00010000)", "Impact": "First-loss capital may be liquidated to cover losses" }, error: defaultTxResult !== "tesSUCCESS" ? `LoanManage default failed: ${defaultTxResult}` : undefined });
 
-    if (txResult !== "tesSUCCESS") throw new Error(`LoanManage failed: ${txResult}`);
+    if (defaultTxResult !== "tesSUCCESS") throw new Error(`LoanManage default failed: ${defaultTxResult}`);
   } catch (err: any) {
-    emitStep(emit, { id: stepId, title: "Broker Defaults the Loan", description: "Failed", status: "error", error: err.message });
+    emitStep(emit, { id: "loan-manage-default", title: "Broker Defaults the Loan", description: "Failed", status: "error", error: err.message });
     throw err;
   }
 }
@@ -1291,9 +1352,9 @@ function getScenarioStepCount(scenarioId: ScenarioId, useBatch?: boolean): numbe
   switch (scenarioId) {
     case "loan-creation": return setupSteps + 2;     // +LoanSet +Verify
     case "loan-payment": return setupSteps + 3;      // +LoanSet +LoanPay +Verify
-    case "loan-default": return setupSteps + 4;      // +LoanSet +LoanManage +LoanDelete +Verify
+    case "loan-default": return setupSteps + 6;      // +LoanSet +Impair +GraceWait +Default +LoanDelete +Verify
     case "early-repayment": return setupSteps + 5;   // +LoanSet +FundBorrower +LoanPay +LoanDelete +Verify
-    case "full-lifecycle": return setupSteps + 8;    // +LoanSet +LoanPay +LoanManage +LoanDelete +CoverWithdraw +BrokerDelete +VaultWithdraw +VaultDelete
+    case "full-lifecycle": return setupSteps + 10;   // +LoanSet +LoanPay +Impair +GraceWait +Default +LoanDelete +CoverWithdraw +BrokerDelete +VaultWithdraw +VaultDelete
     case "signerlist-loan": return setupSteps + 3;   // +SignerListSet +LoanSetMultiSig +Verify
     default: return setupSteps + 2;
   }
@@ -1315,25 +1376,35 @@ async function updateLoanStats(ctx: FlowContext, emit: EmitFn) {
     } as any);
     const loan = (response.result as any).node || (response.result as any).ledger_entry;
     if (loan) {
-      const principal = parseFloat(extractAmount(loan.PrincipalAmount || loan.PrincipalRequested));
-      const principalPaid = parseFloat(extractAmount(loan.PrincipalPaid));
-      const interestPaid = parseFloat(extractAmount(loan.InterestPaid));
-      const paymentAmount = extractAmount(loan.PaymentAmount);
+      console.log("Loan ledger entry:", JSON.stringify(loan, null, 2));
+      const principalOutstanding = parseFloat(extractAmount(loan.PrincipalOutstanding));
+      const totalOutstanding = parseFloat(extractAmount(loan.TotalValueOutstanding));
+      const managementFee = parseFloat(extractAmount(loan.ManagementFeeOutstanding));
+      const periodicPayment = extractAmount(loan.PeriodicPayment);
       const RIPPLE_EPOCH = 946684800;
       const nextDueRaw = loan.NextPaymentDueDate;
       const nextDueDate = nextDueRaw
         ? new Date((nextDueRaw + RIPPLE_EPOCH) * 1000).toLocaleString()
         : "N/A";
 
+      const lsfLoanDefault = 0x00010000;
+      const lsfLoanImpaired = 0x00020000;
+      let loanStatus = "Active";
+      if (loan.Flags & lsfLoanDefault) loanStatus = "Defaulted";
+      else if (loan.Flags & lsfLoanImpaired) loanStatus = "Impaired";
+
+      const interestOwed = Math.max(0, totalOutstanding - principalOutstanding);
       const stats = {
-        principalPaid: principalPaid.toFixed(2),
-        principalRemaining: Math.max(0, principal - principalPaid).toFixed(2),
-        interestPaid: interestPaid.toFixed(2),
-        nextPaymentAmount: paymentAmount,
+        principalPaid: (principalOutstanding > 0 && loan.PrincipalRequested
+          ? (parseFloat(extractAmount(loan.PrincipalRequested)) - principalOutstanding).toFixed(2)
+          : "0.00"),
+        principalRemaining: principalOutstanding.toFixed(2),
+        interestPaid: interestOwed.toFixed(2),
+        nextPaymentAmount: periodicPayment,
         nextPaymentDueDate: nextDueDate,
-        totalPaymentsMade: loan.PaymentsMade ?? loan.PaymentsCompleted ?? 0,
-        totalPaymentsRemaining: loan.PaymentsRemaining ?? (loan.PaymentTotal ? loan.PaymentTotal - (loan.PaymentsMade ?? 0) : 0),
-        status: loan.Flags & 0x00010000 ? "Defaulted" : "Active",
+        totalPaymentsMade: loan.PaymentTotal ? (loan.PaymentTotal - (loan.PaymentRemaining ?? 0)) : 0,
+        totalPaymentsRemaining: loan.PaymentRemaining ?? 0,
+        status: loanStatus,
       };
       emit({ type: "state_update", data: { loanStats: stats } });
     }

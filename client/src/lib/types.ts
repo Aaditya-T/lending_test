@@ -64,10 +64,12 @@ export const SCENARIOS: ScenarioConfig[] = [
   {
     id: "loan-default",
     name: "Loan Default",
-    description: "Create a loan then the broker defaults it via LoanManage, demonstrating first-loss capital protection",
+    description: "Create a loan, broker impairs it, waits for grace period, then defaults via LoanManage. Demonstrates first-loss capital protection",
     diagramSteps: [
       { label: "Setup", actor: "All" },
       { label: "Create Loan", actor: "Both" },
+      { label: "Impair Loan", actor: "Broker" },
+      { label: "Grace Period", actor: "System" },
       { label: "Default Loan", actor: "Broker" },
       { label: "Delete Loan", actor: "Broker" },
       { label: "Verify", actor: "System" },
