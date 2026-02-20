@@ -1039,14 +1039,19 @@ async function submitBatch(ctx: FlowContext, config: BatchConfig): Promise<{ has
   // calls autofillBatchTxn() which correctly handles:
   //   - Sequence assignment (incrementing for same-account, offset for outer-signer)
   //   - Fee="0", SigningPubKey="", NetworkID
-  const rawTransactions = innerTxns.map(({ tx }) => ({
-    RawTransaction: {
+  const rawTransactions = innerTxns.map(({ tx }) => {
+    const inner: Record<string, any> = {
       ...tx,
       Flags: ((tx.Flags || 0) as number) | 0x40000000,
       Fee: "0",
       SigningPubKey: "",
-    },
-  }));
+    };
+    delete inner.LastLedgerSequence;
+    delete inner.TxnSignature;
+    delete inner.Signers;
+    delete inner.DeliverMax;
+    return { RawTransaction: inner };
+  });
 
   const batchTx: Record<string, any> = {
     TransactionType: "Batch",
@@ -1058,10 +1063,17 @@ async function submitBatch(ctx: FlowContext, config: BatchConfig): Promise<{ has
   // autofill handles outer Sequence/Fee/LastLedgerSequence AND inner Sequences
   const prepared = await ctx.client.autofill(batchTx as any);
 
-  // Give generous LastLedgerSequence window (signing takes time)
+  // Give generous LastLedgerSequence window (signing + combining takes time)
   if ((prepared as any).LastLedgerSequence) {
     (prepared as any).LastLedgerSequence += 20;
+  } else {
+    const currentLedger = await ctx.client.getLedgerIndex();
+    (prepared as any).LastLedgerSequence = currentLedger + 30;
   }
+
+  console.log("[Batch] Inner txn count:", rawTransactions.length,
+    "| Outer Fee:", (prepared as any).Fee,
+    "| LLS:", (prepared as any).LastLedgerSequence);
 
   // Adjust outer Fee per XLS-56 spec: (n+2)*baseFee + sum(innerTxn.Fee)
   // where n = number of BatchSigners. autofill may not account for BatchSigners.
