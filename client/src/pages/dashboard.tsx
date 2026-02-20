@@ -24,6 +24,9 @@ import {
   AlertTriangle,
   Download,
   Upload,
+  Globe,
+  Settings2,
+  Check,
 } from "lucide-react";
 import type { FlowState, FlowStep, Party, ScenarioId } from "@/lib/types";
 import { SCENARIOS } from "@/lib/types";
@@ -232,7 +235,7 @@ const initialState: FlowState = {
     { role: "broker", label: "Broker" },
   ],
   steps: [],
-  network: "wss://s.devnet.rippletest.net:51233",
+  network: localStorage.getItem("xrpl-network") || "wss://s.devnet.rippletest.net:51233",
 };
 
 export default function Dashboard() {
@@ -241,6 +244,8 @@ export default function Dashboard() {
   const [showReport, setShowReport] = useState(false);
   const [selectedScenario, setSelectedScenario] = useState<ScenarioId>("loan-creation");
   const [useBatch, setUseBatch] = useState(false);
+  const [customNetwork, setCustomNetwork] = useState(() => localStorage.getItem("xrpl-network") || "wss://s.devnet.rippletest.net:51233");
+  const [showNetworkInput, setShowNetworkInput] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleExport = useCallback(() => {
@@ -327,7 +332,7 @@ export default function Dashboard() {
       }
     };
 
-    runLendingFlow(emit, selectedScenario, { useBatch }).catch((err) => {
+    runLendingFlow(emit, selectedScenario, { useBatch, network: customNetwork }).catch((err) => {
       setState((prev) => ({ ...prev, status: "error", errorMessage: err.message }));
     });
   }, [selectedScenario, useBatch]);
@@ -352,9 +357,17 @@ export default function Dashboard() {
             </div>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
-            <Badge variant="outline" className="font-mono text-xs" data-testid="text-network">
-              Devnet
-            </Badge>
+            <button
+              onClick={() => setShowNetworkInput(!showNetworkInput)}
+              className="flex items-center gap-1 cursor-pointer"
+              data-testid="button-toggle-network"
+            >
+              <Badge variant="outline" className="font-mono text-xs flex items-center gap-1">
+                <Globe className="w-3 h-3" />
+                {customNetwork.includes("devnet") ? "Devnet" : customNetwork.includes("testnet") ? "Testnet" : "Custom"}
+                <Settings2 className="w-3 h-3 text-muted-foreground" />
+              </Badge>
+            </button>
             <ThemeToggle />
             <Button
               variant="outline"
@@ -385,6 +398,46 @@ export default function Dashboard() {
           </div>
         </div>
       </header>
+
+      {showNetworkInput && (
+        <div className="border-b bg-card/50">
+          <div className="max-w-6xl mx-auto px-4 py-3 flex items-center gap-3 flex-wrap">
+            <label className="text-xs font-medium text-muted-foreground whitespace-nowrap">WebSocket URL:</label>
+            <input
+              type="text"
+              value={customNetwork}
+              onChange={(e) => setCustomNetwork(e.target.value)}
+              disabled={state.status === "running"}
+              className="flex-1 min-w-[300px] px-3 py-1.5 rounded-md border bg-background text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary/50 disabled:opacity-50"
+              placeholder="wss://s.devnet.rippletest.net:51233"
+              data-testid="input-network-url"
+            />
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                localStorage.setItem("xrpl-network", customNetwork);
+                setShowNetworkInput(false);
+              }}
+              data-testid="button-save-network"
+            >
+              <Check className="w-3 h-3" />
+              Save
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                setCustomNetwork("wss://s.devnet.rippletest.net:51233");
+                localStorage.setItem("xrpl-network", "wss://s.devnet.rippletest.net:51233");
+              }}
+              data-testid="button-reset-network"
+            >
+              Reset
+            </Button>
+          </div>
+        </div>
+      )}
 
       <main className="max-w-6xl mx-auto px-4 py-6 space-y-6">
         <div className="flex items-center gap-2 p-3 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-md text-xs text-amber-800 dark:text-amber-300" data-testid="banner-session-warning">

@@ -1415,7 +1415,7 @@ async function updateLoanStats(ctx: FlowContext, emit: EmitFn) {
   }
 }
 
-export async function runLendingFlow(emit: EmitFn, scenarioId: ScenarioId = "loan-creation", options?: { useBatch?: boolean }): Promise<string> {
+export async function runLendingFlow(emit: EmitFn, scenarioId: ScenarioId = "loan-creation", options?: { useBatch?: boolean; network?: string }): Promise<string> {
   const ctx: FlowContext = {
     client: null as any,
     issuer: null as any,
@@ -1426,7 +1426,7 @@ export async function runLendingFlow(emit: EmitFn, scenarioId: ScenarioId = "loa
     useBatch: options?.useBatch ?? false,
   };
 
-  const network = "wss://s.devnet.rippletest.net:51233";
+  const network = options?.network || "wss://s.devnet.rippletest.net:51233";
 
   addReport(ctx,
     "=".repeat(70), `XRPL LENDING PROTOCOL - ${scenarioId.toUpperCase()} SCENARIO`, "=".repeat(70),
