@@ -56,7 +56,7 @@ async function submitAndWaitSafe(client: xrpl.Client, txBlob: string): Promise<a
 
   if (prelimResult && prelimResult !== "tesSUCCESS") {
     const prefix = prelimResult.substring(0, 3);
-    if (prefix === "tem" || prefix === "tef" || prefix === "ter") {
+    if (prefix === "tem" || prefix === "tef" || prefix === "ter" || prefix === "tel") {
       throw new Error(`${prelimResult}: ${prelimMessage || "Transaction rejected by server"}`);
     }
   }
@@ -752,7 +752,7 @@ async function step_loanPay(ctx: FlowContext, emit: EmitFn, opts?: { earlyFull?:
           const serviceFee = parseFloat(extractAmount(loanNode.LoanServiceFee));
           const closePaymentFee = parseFloat(extractAmount(loanNode.ClosePaymentFee));
           const totalDue = totalOutstanding + serviceFee + closePaymentFee;
-          payAmount = String(Math.ceil(totalDue * 1.05));
+          payAmount = (totalDue * 1.05).toFixed(6);
           addReport(ctx,
             `TotalValueOutstanding: ${totalOutstanding}`,
             `LoanServiceFee: ${serviceFee}`,
@@ -774,6 +774,8 @@ async function step_loanPay(ctx: FlowContext, emit: EmitFn, opts?: { earlyFull?:
     };
 
     const prepared = await ctx.client.autofill(loanPayTx as any);
+    const baseFee = parseInt(prepared.Fee || "12", 10);
+    prepared.Fee = String(Math.max(baseFee * 2, 24));
     const signed = ctx.borrower.wallet.sign(prepared);
     const result = await submitAndWaitSafe(ctx.client, signed.tx_blob);
     const txResult = (result.result.meta as any)?.TransactionResult || "unknown";
